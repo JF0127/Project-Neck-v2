@@ -1,0 +1,15 @@
+{
+  "kp": 150,
+  "kd": 2,
+  "comp": 0,
+  "lead": 0,
+  "tf": 0,
+  "rate": 500,
+  "port": 9870,
+  "time": 1.0,
+  "cycles": 1,
+  "accel": 100,
+  "vmax": 0,
+  "amax": 0,
+  "log": 1
+}

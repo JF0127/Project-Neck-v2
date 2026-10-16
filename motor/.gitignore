@@ -1,0 +1,7 @@
+build/
+build-*/
+data/sweep/
+data/analysis/
+__pycache__/
+*.pyc
+.DS_Store

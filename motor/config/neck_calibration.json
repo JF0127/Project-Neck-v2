@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-10-13",
+  "units": {
+    "angle_fields": "deg (fields ending in _deg)",
+    "sign": "dimensionless, +1 or -1",
+    "id_and_schema_version": "dimensionless",
+    "date": "YYYY-MM-DD"
+  },
+  "hardware": {
+    "motor_model": "ENCOS EC-A2806-P2-36",
+    "angle_reference": "output_shaft_absolute",
+    "readings_persist_after_power_cycle": true,
+    "mechanical_range_fixed": true,
+    "source": "已确定的电机规格与实测观察",
+    "status": "confirmed"
+  },
+  "conventions": {
+    "viewpoint": "人面对机器头；人的左边 = 机器人右侧",
+    "rpy_standard": "REP-103",
+    "rpy_order": ["roll", "pitch", "yaw"],
+    "head_axes": "x 朝前，y 朝机器人左侧，z 朝上",
+    "rotation_matrix": "R = Rz(yaw) Ry(pitch) Rx(roll)",
+    "rotation_axes": "fixed",
+    "positive_roll": "机器人向右歪头（左耳抬高）",
+    "positive_pitch": "低头",
+    "positive_yaw": "机器人向左转",
+    "source": "neck_kinematics.py 与 Project-Neck 脖子运动学模型说明.md",
+    "status": "confirmed"
+  },
+  "soft_limits": {
+    "margin_deg": 5.0,
+    "source": "已确定的软件限位策略：实测机械范围的数值最小值加 margin，最大值减 margin",
+    "status": "confirmed_policy_not_hardware_safety_guarantee",
+    "note": "不存储派生上下限；由读取函数计算。曲柄范围为单电机转动、其他电机不动时测得，耦合状态下极限可能不同。"
+  },
+  "model": {
+    "min_margin_deg": 30.0,
+    "source": "neck_kinematics.py 的传动角裕度判据与已确定的阈值",
+    "status": "confirmed_policy"
+  },
+  "motors": [
+    {
+      "id": 1,
+      "mapping": {
+        "model_joint": "q1",
+        "position": "人视角左侧 = 机器人右侧",
+        "branch": "支链 1，CAD +Z 侧",
+        "role": "曲柄",
+        "source": "已确定的装配对应关系与模型支链定义",
+        "status": "confirmed"
+      },
+      "mechanical_range": {
+        "endpoints": [
+          {"label": "最下", "angle_deg": -3.875301},
+          {"label": "最上", "angle_deg": 80.715561}
+        ],
+        "source": "驱动器输出端绝对角度实测；单电机转动，其他电机不动",
+        "status": "measured_single_motor_only"
+      },
+      "direction_observation": {
+        "description": "读数增大 → 曲柄向上",
+        "source": "实测方向观察",
+        "status": "confirmed"
+      },
+      "calibration": {
+        "sign": 1,
+        "sign_source": "已确定的驱动器方向与模型正方向对应关系",
+        "sign_status": "confirmed",
+        "offset_deg": 38.42013,
+        "offset_source": "机械范围中点",
+        "offset_status": "provisional",
+        "offset_note": "待目视确认头部大致水平；只允许与 2 号同向等量调整"
+      }
+    },
+    {
+      "id": 2,
+      "mapping": {
+        "model_joint": "q2",
+        "position": "人视角右侧 = 机器人左侧",
+        "branch": "支链 2",
+        "role": "曲柄",
+        "source": "已确定的装配对应关系与模型支链定义",
+        "status": "confirmed"
+      },
+      "mechanical_range": {
+        "endpoints": [
+          {"label": "最下", "angle_deg": 173.235809},
+          {"label": "最上", "angle_deg": 87.385452}
+        ],
+        "source": "驱动器输出端绝对角度实测；单电机转动，其他电机不动",
+        "status": "measured_single_motor_only"
+      },
+      "direction_observation": {
+        "description": "读数减小 → 曲柄向上",
+        "source": "实测方向观察",
+        "status": "confirmed"
+      },
+      "calibration": {
+        "sign": 1,
+        "sign_source": "已确定的驱动器方向与模型正方向对应关系；不以曲柄向上时的读数增减直接决定 sign",
+        "sign_status": "confirmed",
+        "offset_deg": 130.310631,
+        "offset_source": "机械范围中点（保留已确定的六位小数值）",
+        "offset_status": "provisional",
+        "offset_note": "待目视确认头部大致水平；只允许与 1 号同向等量调整"
+      }
+    },
+    {
+      "id": 3,
+      "mapping": {
+        "model_joint": "q3",
+        "position": "—",
+        "branch": "串联 yaw 轴",
+        "role": "头部左右旋转（yaw）",
+        "source": "已确定的装配对应关系与模型定义",
+        "status": "confirmed"
+      },
+      "mechanical_range": {
+        "endpoints": [
+          {"label": "头转到人视角最左", "angle_deg": 238.812057},
+          {"label": "头转到人视角最右", "angle_deg": 56.473869}
+        ],
+        "source": "驱动器输出端绝对角度实测",
+        "status": "measured"
+      },
+      "direction_observation": {
+        "description": "读数增大 → 头转向机器人右侧",
+        "source": "实测方向观察",
+        "status": "confirmed"
+      },
+      "calibration": {
+        "sign": -1,
+        "sign_source": "实测读数增大为机器人右转，与模型 yaw 正方向相反",
+        "sign_status": "confirmed",
+        "offset_deg": 147.642963,
+        "offset_source": "机械范围中点",
+        "offset_status": "confirmed",
+        "offset_note": "中位朝正前方已确认"
+      }
+    }
+  ],
+  "zero_adjustment": {
+    "offset_definition": "头部 rpy = [0, 0, 0] 时的驱动器输出端绝对角度读数",
+    "crank_midpoint_rationale": "1、2 号初始取行程中点，利用左右镜像对称使 roll ≈ 0",
+    "rule": "若目视发现明显抬头或低头，只允许 1、2 号 offset_deg 同向等量调整；不自动重算为中点",
+    "source": "已确定的零位标定与调整规则",
+    "status": "confirmed_policy_crank_level_pending"
+  },
+  "validation": {
+    "scan_step_deg": 0.05,
+    "axis_scan_half_span_deg": 90.0,
+    "range_tolerance_deg": 0.2,
+    "reference_ranges_deg": {
+      "pitch": [-18.5, 22.2],
+      "roll": [-21.7, 21.7],
+      "yaw": [-86.2, 86.2]
+    },
+    "square_boundaries": [
+      {"half_span_deg": 8.0, "expect_all_usable": true},
+      {"half_span_deg": 10.0, "expect_all_usable": false}
+    ],
+    "criterion": "模型 info.ok 且三个输出均有限且不超各自软限位（包含端点）",
+    "source": "任务给定的离线可用范围参考值；扫描步长为校验实现选定值",
+    "status": "regression_reference_not_measured_coupled_workspace"
+  }
+}
