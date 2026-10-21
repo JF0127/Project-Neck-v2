@@ -1,4 +1,13 @@
 {
+  "defaults": {
+    "transition": {
+      "base_time": 0.5,
+      "degrees_per_second": 15.0,
+      "return_time": 0.5
+    },
+    "speaking": {"min_interval": 1.2},
+    "gestures": {"min_interval": 1.5}
+  },
   "default_hold": 2.5,
   "return_to": "attentive",
   "return_duration": 1.2,

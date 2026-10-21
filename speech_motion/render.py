@@ -24,9 +24,9 @@ def render(events, duration, fps=30, seed=0):
 
     Explicit events contain no randomness, so seed does not affect the result.
     """
-    config = json.loads(Path(__file__).with_name("config.json").read_text())["motion"]
-    transition, specs = config["transition"], config["gestures"]
     library = json.loads(Path(__file__).with_name("expressions.json").read_text())
+    config = library["defaults"]
+    transition, specs = config["transition"], config["gestures"]
     expressions = library["expressions"]
     events = sorted(events, key=lambda event: event["t"])
     returns, next_expr = [], np.inf
