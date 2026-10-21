@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>项目结构 · module.md</title>
+<style>
+:root{color-scheme:light;--ink:#18283e;--muted:#65758a;--line:#dce4ef;--blue:#245de1;--paper:#fff;--bg:#f3f6fb}
+*{box-sizing:border-box}body{margin:0;font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg)}button,input{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:3px solid #f6ad30;outline-offset:3px}
+header{background:var(--paper);border-bottom:1px solid var(--line);padding:18px 24px 12px}h1{font-size:21px;margin:0}.toolbar{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-top:10px}.filters{display:flex;gap:15px;border:0;padding:0;margin:0}.filters legend{float:left;margin-right:14px;color:var(--muted)}.filters label{display:flex;align-items:center;gap:6px;cursor:pointer}input{accent-color:var(--blue)}#status{font-size:12px;color:var(--muted);margin-left:auto}#status.error{color:#ac3434}
+nav{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:12px;min-height:30px}nav button{border:0;background:#edf2fd;color:var(--blue);border-radius:6px;padding:3px 10px}nav button[aria-current]{background:transparent;color:var(--ink);font-weight:600}nav span{color:#92a0b2}
+main{display:grid;grid-template-columns:minmax(0,1fr) 360px;height:calc(100vh - 177px);min-height:440px}.workspace{display:flex;flex-direction:column;min-width:0;padding:16px}.hint{font-size:12px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap;padding:0 4px 12px}.swatch{display:inline-block;width:12px;height:12px;border:1px solid #b8c9f0;border-radius:3px;background:#fff;margin-right:4px;vertical-align:-1px}.swatch.gray{background:#e9edf2;border-color:#bcc5cf}#graph{position:relative;overflow:auto;flex:1;min-height:330px;border:1px solid var(--line);border-radius:12px;background-color:#fff;background-image:radial-gradient(#e5ebf4 1px,transparent 1px);background-size:18px 18px}svg{display:block;min-width:100%;min-height:100%}.empty{padding:48px 24px;color:var(--muted);text-align:center}
+.node-card{width:100%;height:100%;text-align:left;border:1.5px solid #b9cbed;border-radius:11px;padding:12px 14px;background:#fff;color:var(--ink);box-shadow:0 3px 9px #233f7610;overflow:hidden;transition:border-color .15s,background .15s}.node-card:hover{border-color:var(--blue);background:#f7faff}.node-card.external{background:#edf0f4;border-color:#c0c8d2;color:#526072}.node-card.selected{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}.node-title{font-size:15px;font-weight:650;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.node-summary{font-size:12px;color:var(--muted);line-height:1.5;margin-top:7px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.node-foot{font-size:10px;color:#7b8ba2;margin-top:5px}.edge-line{fill:none;stroke:#91a8ca;stroke-width:1.7;pointer-events:none}.edge.selected .edge-line{stroke:var(--blue);stroke-width:2.8}.edge-hit{fill:none;stroke:transparent;stroke-width:18;cursor:pointer}.edge:focus-visible{outline:none}.edge:focus-visible .edge-line,.edge:hover .edge-line{stroke:var(--blue);stroke-width:2.8}.edge-label{cursor:pointer}.edge-label rect{fill:#fff;stroke:#c9d6e9}.edge-label text{font-size:11px;fill:#345479;text-anchor:middle;dominant-baseline:central}.edge-label.selected rect{stroke:var(--blue);fill:#edf3ff}
+aside{background:var(--paper);border-left:1px solid var(--line);overflow:auto;padding:22px}aside h2{font-size:19px;line-height:1.4;margin:0 0 8px}aside h3{font-size:14px;margin:20px 0 6px}aside p{white-space:pre-wrap;overflow-wrap:anywhere}.muted{color:var(--muted)}.id{font:12px/1.6 ui-monospace,monospace;color:var(--muted);overflow-wrap:anywhere}.summary{font-weight:600}#details ol{padding-left:21px}#details li{padding:12px 0;border-bottom:1px solid var(--line)}code{font:12px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;color:#254a8c}.badges{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.badge{font-size:11px;padding:1px 7px;border-radius:4px;background:#eef2f8;color:#50637d}.flow-detail{font-size:13px;margin:7px 0 0}.panel-note{font-size:12px;color:var(--muted)}
+@media(max-width:850px){main{grid-template-columns:1fr;height:auto}.workspace{height:62vh;min-height:420px}aside{border-left:0;border-top:1px solid var(--line);max-height:65vh;min-height:230px}header{padding:14px 16px}#status{margin-left:0}.toolbar{gap:12px}}
+</style>
+</head>
+<body>
+<header>
+<h1 id="project">项目结构</h1>
+<div class="toolbar">
+<fieldset class="filters"><legend>数据类型</legend>
+<label><input type="checkbox" value="实时" checked>实时</label>
+<label><input type="checkbox" value="配置">配置</label>
+<label><input type="checkbox" value="文件">文件</label>
+</fieldset>
+<span id="status" role="status" aria-live="polite">正在读取 module.md…</span>
+</div>
+<nav id="breadcrumbs" aria-label="模块路径"></nav>
+</header>
+<main>
+<section class="workspace" aria-label="结构图">
+<div class="hint"><span><i class="swatch"></i>当前层模块</span><span><i class="swatch gray"></i>层外关联模块</span><span>点模块查看详情，有子模块时进入；点箭头查看数据流。循环中的反馈箭头向左绕行。</span></div>
+<div id="graph"></div>
+</section>
+<aside id="details" aria-label="详细信息"><h2>项目结构</h2><p class="muted">选择模块或箭头查看详情。</p><p class="panel-note">只读展示 module.md，每 3 秒自动读取。图中的“层外”表示当前查看范围之外，并不等同于名称中标注的“外部”设备。</p></aside>
+</main>
+<script>
+'use strict';
+(() => {
+  const SVG = 'http://www.w3.org/2000/svg';
+  const XHTML = 'http://www.w3.org/1999/xhtml';
+  const graph = document.getElementById('graph');
+  const details = document.getElementById('details');
+  const status = document.getElementById('status');
+  const crumbs = document.getElementById('breadcrumbs');
+  const filters = [...document.querySelectorAll('.filters input')];
+  let model = {title:'项目结构', modules:new Map(), flows:[]};
+  let source = null, scope = '', selection = null, visibleEdges = new Map(), loading = false;
+
+  function el(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+  function svgEl(tag, attrs = {}) {
+    const node = document.createElementNS(SVG, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    return node;
+  }
+  function parent(id) { const at = id.lastIndexOf('/'); return at < 0 ? '' : id.slice(0, at); }
+  function within(id, root) { return id === root || id.startsWith(root + '/'); }
+  function children(id) { return [...model.modules.values()].filter(m => parent(m.id) === id); }
+  function moduleName(id) { return model.modules.get(id)?.name || id; }
+
+  function parse(text) {
+    const modules = new Map(), flows = [];
+    let title = '项目结构', section = '', current = null, skipped = 0;
+    const idPattern = '[a-z_]+(?:/[a-z_]+)*';
+    const heading = new RegExp('^###\\s+(' + idPattern + ')\\s*·\\s*(.+)$');
+    const arrow = new RegExp('^-\\s+(' + idPattern + ')\\s*->\\s*(' + idPattern + ')\\s*:\\s*(.+)$');
+    for (const raw of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+      const line = raw.trim();
+      if (/^#\s+/.test(line)) title = line.replace(/^#\s+/, '');
+      if (/^##\s+/.test(line)) { section = line.replace(/^##\s+/, ''); current = null; continue; }
+      const match = section === '模块' ? line.match(heading) : null;
+      if (match) {
+        current = {id:match[1], name:match[2].trim(), summary:'', detail:''};
+        modules.set(current.id, current);
+      } else if (section === '模块' && current && /^概要[：:]/.test(line)) {
+        current.summary = line.replace(/^概要[：:]\s*/, '');
+      } else if (section === '模块' && current && /^详细[：:]/.test(line)) {
+        current.detail = line.replace(/^详细[：:]\s*/, '');
+      } else if (section === '数据流' && line.startsWith('-')) {
+        const edge = line.match(arrow);
+        if (!edge) { skipped++; continue; }
+        const fields = edge[3].split('|').map(part => part.trim());
+        if (fields.length < 5 || !['实时','配置','文件'].includes(fields[3])) { skipped++; continue; }
+        flows.push({from:edge[1], to:edge[2], name:fields[0], label:fields[1],
+          display:fields[2], type:fields[3], detail:fields.slice(4).join(' | ')});
+      }
+    }
+    // 数据名、标签、展示方式、类型、说明共五段。
+    return {title, modules, flows, skipped};
+  }
+
+  function graphData() {
+    const active = new Set(filters.filter(box => box.checked).map(box => box.value));
+    const inside = children(scope);
+    const nodes = new Map(inside.map(m => [m.id, {...m, external:false}]));
+    const edges = new Map();
+    const depth = scope ? scope.split('/').length + 1 : 1;
+    function mapEndpoint(id) {
+      if (!model.modules.has(id)) return null;
+      const parts = id.split('/');
+      let mapped = parts.slice(0, depth).join('/');
+      while (mapped && !model.modules.has(mapped)) mapped = parent(mapped);
+      return mapped || null;
+    }
+    for (const flow of model.flows) {
+      if (!active.has(flow.type)) continue;
+      if (scope && !within(flow.from, scope) && !within(flow.to, scope)) continue;
+      const from = mapEndpoint(flow.from), to = mapEndpoint(flow.to);
+      if (!from || !to || from === to || from === scope || to === scope) continue;
+      for (const id of [from, to]) {
+        if (!nodes.has(id)) nodes.set(id, {...model.modules.get(id), external:!!scope && !within(id, scope)});
+      }
+      const key = from + '\u0000' + to;
+      if (!edges.has(key)) edges.set(key, {key, from, to, flows:[]});
+      edges.get(key).flows.push(flow);
+    }
+    return {nodes, edges};
+  }
+
+  // 先移除源点和汇点，再对循环选择出边最多的点，反馈边单独绕行。
+  function flowOrder(ids, edges) {
+    const remaining = new Set(ids), left = [], right = [];
+    while (remaining.size) {
+      const degrees = new Map([...remaining].map(id => [id, {incoming:0, outgoing:0}]));
+      for (const edge of edges) if (remaining.has(edge.from) && remaining.has(edge.to)) {
+        degrees.get(edge.from).outgoing++;
+        degrees.get(edge.to).incoming++;
+      }
+      let chosen = [...remaining].find(id => degrees.get(id).incoming === 0);
+      if (chosen !== undefined) { left.push(chosen); remaining.delete(chosen); continue; }
+      chosen = [...remaining].find(id => degrees.get(id).outgoing === 0);
+      if (chosen !== undefined) { right.push(chosen); remaining.delete(chosen); continue; }
+      chosen = [...remaining].reduce((best, id) => {
+        const d = degrees.get(id), b = degrees.get(best);
+        return d.outgoing - d.incoming > b.outgoing - b.incoming ? id : best;
+      });
+      left.push(chosen); remaining.delete(chosen);
+    }
+    return left.concat(right.reverse());
+  }
+
+  function layout(nodes, edgeMap) {
+    const edges = [...edgeMap.values()];
+    const internal = [...nodes.values()].filter(n => !n.external).map(n => n.id);
+    const internalSet = new Set(internal);
+    const internalEdges = edges.filter(e => internalSet.has(e.from) && internalSet.has(e.to));
+    const order = flowOrder(internal, internalEdges);
+    const rank = new Map(order.map(id => [id, 0]));
+    const index = new Map(order.map((id, i) => [id, i]));
+    for (const id of order) for (const e of internalEdges) {
+      if (e.from === id && index.get(e.to) > index.get(id)) rank.set(e.to, Math.max(rank.get(e.to), rank.get(id) + 1));
+    }
+    const left = [], right = [];
+    for (const node of nodes.values()) if (node.external) {
+      let incoming = 0, outgoing = 0;
+      for (const e of edges) {
+        if (e.from === node.id && internalSet.has(e.to)) incoming += e.flows.length;
+        if (e.to === node.id && internalSet.has(e.from)) outgoing += e.flows.length;
+      }
+      (incoming >= outgoing ? left : right).push(node.id);
+    }
+    const shift = left.length ? 1 : 0;
+    for (const id of internal) rank.set(id, rank.get(id) + shift);
+    const last = Math.max(shift, ...rank.values());
+    for (const id of left) rank.set(id, 0);
+    for (const id of right) rank.set(id, last + 1);
+    const groups = new Map();
+    for (const [id, col] of rank) {
+      if (!groups.has(col)) groups.set(col, []);
+      groups.get(col).push(id);
+    }
+    const row = new Map();
+    for (const list of groups.values()) list.forEach((id, i) => row.set(id, i));
+    for (let pass = 0; pass < 4; pass++) for (const list of groups.values()) {
+      function center(id) {
+        const neighbors = edges.filter(e => e.from === id || e.to === id)
+          .map(e => row.get(e.from === id ? e.to : e.from)).filter(n => n !== undefined);
+        return neighbors.length ? neighbors.reduce((a,b) => a+b, 0) / neighbors.length : row.get(id);
+      }
+      const centers = new Map(list.map(id => [id, center(id)]));
+      list.sort((a,b) => centers.get(a) - centers.get(b));
+      list.forEach((id, i) => row.set(id, i));
+    }
+    const backward = edges.filter(e => rank.get(e.to) < rank.get(e.from)).length;
+    const W = 240, H = 122, gapX = 104, gapY = 42, margin = 44, top = 60 + backward * 14;
+    const maxRows = Math.max(1, ...[...groups.values()].map(list => list.length));
+    const positions = new Map();
+    for (const [col, list] of groups) list.forEach((id, i) => positions.set(id, {
+      x:margin + col * (W + gapX), y:top + ((maxRows - list.length) / 2 + i) * (H + gapY), w:W, h:H
+    }));
+    return {positions, width:margin*2 + (Math.max(0, ...rank.values())+1)*(W+gapX)-gapX,
+      height:top + maxRows*(H+gapY)-gapY+margin};
+  }
+
+  function showModule(id, external = false) {
+    const m = model.modules.get(id);
+    if (!m) return;
+    details.replaceChildren(el('h2', m.name), el('div', m.id, 'id'), el('p', m.summary, 'summary'), el('h3','详细说明'), el('p',m.detail || '暂无详细说明。'));
+    if (external) details.append(el('p','此模块位于当前查看范围之外。','panel-note'));
+    if (children(id).length) details.append(el('p','已展开此模块的直属子模块，可通过顶部路径返回。','panel-note'));
+  }
+  function showEdge(edge) {
+    details.replaceChildren(el('h2','数据流 · ' + edge.flows.length + ' 条'), el('p',moduleName(edge.from) + ' → ' + moduleName(edge.to), 'summary'));
+    const list = el('ol');
+    for (const f of edge.flows) {
+      const item = el('li');
+      item.append(el('code',f.name), el('div',f.label,'summary'));
+      const badges = el('div',undefined,'badges');
+      badges.append(el('span',f.display,'badge'),el('span',f.type,'badge'));
+      item.append(badges,el('div',f.from + ' → ' + f.to,'id'),el('p',f.detail,'flow-detail'));
+      list.append(item);
+    }
+    details.append(list);
+  }
+  function updateDetails() {
+    if (!selection) return;
+    if (selection.kind === 'module' && model.modules.has(selection.id)) {
+      showModule(selection.id, !!scope && !within(selection.id, scope));
+    } else if (selection.kind === 'edge' && visibleEdges.has(selection.key)) {
+      showEdge(visibleEdges.get(selection.key));
+    } else {
+      details.replaceChildren(el('h2','选择已不可见'),el('p','所选模块或数据流已移除，或不属于当前层级与类型筛选。请选择图中的模块或箭头。','muted'));
+    }
+  }
+  function navigate(id) {
+    scope = id;
+    selection = id ? {kind:'module',id} : null;
+    if (!id) details.replaceChildren(el('h2',model.title),el('p','选择模块或箭头查看详情。','muted'));
+    render();
+  }
+  function renderCrumbs() {
+    crumbs.replaceChildren();
+    function crumb(id, label) {
+      if (crumbs.childNodes.length) crumbs.append(el('span','/'));
+      const button = el('button',label); button.type = 'button';
+      if (id === scope) button.setAttribute('aria-current','page');
+      button.addEventListener('click',() => navigate(id)); crumbs.append(button);
+    }
+    crumb('', '全部模块');
+    if (scope) {
+      let path = '';
+      for (const part of scope.split('/')) { path = path ? path+'/'+part : part; crumb(path,moduleName(path)); }
+    }
+  }
+  function render() {
+    const scroll = {x:graph.scrollLeft, y:graph.scrollTop};
+    renderCrumbs();
+    const {nodes,edges} = graphData(); visibleEdges = edges;
+    graph.replaceChildren();
+    if (!nodes.size) { graph.append(el('p','当前层级没有可展示的模块。','empty')); updateDetails(); return; }
+    const {positions,width,height} = layout(nodes,edges);
+    const svg = svgEl('svg',{width,height,viewBox:`0 0 ${width} ${height}`,role:'group','aria-label':'模块与聚合数据流'});
+    const defs = svgEl('defs');
+    const marker = svgEl('marker',{id:'arrowhead',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7,markerHeight:7,orient:'auto-start-reverse'});
+    marker.append(svgEl('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'#7895bf'})); defs.append(marker); svg.append(defs);
+    const edgeLayer = svgEl('g'), labelLayer = svgEl('g'), nodeLayer = svgEl('g');
+    svg.append(edgeLayer,labelLayer,nodeLayer); graph.append(svg);
+    const ports = new Map();
+    function register(id,side,key) {
+      const k = id+'|'+side;
+      if (!ports.has(k)) ports.set(k,[]);
+      ports.get(k).push(key);
+    }
+    const sides = new Map();
+    for (const e of edges.values()) {
+      const a = positions.get(e.from), b = positions.get(e.to);
+      const forward = b.x > a.x, same = a.x === b.x;
+      const sourceSide = forward || same ? 'right' : 'left';
+      const targetSide = forward ? 'left' : 'right';
+      sides.set(e.key,{sourceSide,targetSide,same,forward});
+      register(e.from,sourceSide,e.key); register(e.to,targetSide,e.key);
+    }
+    function port(id,side,key) {
+      const p = positions.get(id), list = ports.get(id+'|'+side);
+      return {x:p.x+(side === 'right' ? p.w : 0),y:p.y+18+(p.h-36)*(list.indexOf(key)+1)/(list.length+1)};
+    }
+    let lane = 0;
+    for (const e of edges.values()) {
+      const side = sides.get(e.key), a = port(e.from,side.sourceSide,e.key), b = port(e.to,side.targetSide,e.key);
+      let d;
+      if (side.same) {
+        const bend = Math.max(a.x,b.x)+64;
+        d = `M ${a.x} ${a.y} C ${bend} ${a.y}, ${bend} ${b.y}, ${b.x} ${b.y}`;
+      } else if (side.forward) {
+        const bend = Math.max(40,(b.x-a.x)/2);
+        d = `M ${a.x} ${a.y} C ${a.x+bend} ${a.y}, ${b.x-bend} ${b.y}, ${b.x} ${b.y}`;
+      } else {
+        const y = 24 + lane++ * 14;
+        d = `M ${a.x} ${a.y} C ${a.x-30} ${a.y}, ${a.x-30} ${y}, ${a.x-30} ${y} L ${b.x+30} ${y} C ${b.x+30} ${y}, ${b.x+30} ${b.y}, ${b.x} ${b.y}`;
+      }
+      const selected = selection?.kind === 'edge' && selection.key === e.key;
+      const group = svgEl('g',{class:'edge'+(selected?' selected':''),tabindex:0,role:'button','aria-label':moduleName(e.from)+'到'+moduleName(e.to)+'，'+e.flows.length+'条数据流'});
+      const path = svgEl('path',{d,class:'edge-line','marker-end':'url(#arrowhead)'});
+      group.append(path,svgEl('path',{d,class:'edge-hit'})); edgeLayer.append(group);
+      const mid = path.getPointAtLength(path.getTotalLength()/2);
+      const label = svgEl('g',{class:'edge-label'+(selected?' selected':''),transform:`translate(${mid.x},${mid.y})`});
+      label.append(svgEl('rect',{x:-24,y:-11,width:48,height:22,rx:7}));
+      const text = svgEl('text',{x:0,y:0}); text.textContent = e.flows.length+' 条'; label.append(text); labelLayer.append(label);
+      const choose = () => { selection = {kind:'edge',key:e.key}; render(); };
+      group.addEventListener('click',choose); label.addEventListener('click',choose);
+      group.addEventListener('keydown',event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } });
+    }
+    for (const node of nodes.values()) {
+      const p = positions.get(node.id);
+      const foreign = svgEl('foreignObject',{x:p.x,y:p.y,width:p.w,height:p.h});
+      const button = document.createElementNS(XHTML,'button'); button.type = 'button';
+      button.className = 'node-card'+(node.external?' external':'')+(selection?.kind === 'module' && selection.id === node.id?' selected':'');
+      button.title = node.id+'\n'+node.name+'\n'+node.summary;
+      button.append(el('div',node.name,'node-title'),el('div',node.summary,'node-summary'),el('div',(node.external?'层外关联 · ':'')+(children(node.id).length?'点击展开子模块':'点击查看详情'),'node-foot'));
+      button.addEventListener('click',() => {
+        selection = {kind:'module',id:node.id};
+        if (children(node.id).length) scope = node.id;
+        render();
+      });
+      foreign.append(button); nodeLayer.append(foreign);
+    }
+    graph.scrollLeft = scroll.x; graph.scrollTop = scroll.y;
+    updateDetails();
+  }
+
+  async function reload() {
+    if (loading) return;
+    loading = true;
+    try {
+      const response = await fetch('./module.md',{cache:'no-store'});
+      if (!response.ok) throw new Error('HTTP '+response.status);
+      const text = await response.text();
+      if (text !== source) {
+        const next = parse(text);
+        if (!next.modules.size) throw new Error('未找到有效的模块定义');
+        model = next; source = text;
+        while (scope && !model.modules.has(scope)) scope = parent(scope);
+        document.getElementById('project').textContent = model.title;
+        document.title = model.title+' · 项目结构';
+        render();
+      }
+      status.className = '';
+      status.textContent = '已同步 '+new Date().toLocaleTimeString()+' · 每 3 秒刷新'+(model.skipped?' · 忽略 '+model.skipped+' 条格式无效的数据流':'');
+    } catch (error) {
+      status.className = 'error';
+      status.textContent = '读取失败：'+error.message+'；3 秒后重试';
+      if (source === null) {
+        graph.replaceChildren(el('p','请通过本地服务器打开此页面，而不是直接打开 HTML 文件。','empty'));
+      }
+    } finally { loading = false; }
+  }
+  filters.forEach(box => box.addEventListener('change',render));
+  reload(); setInterval(reload,3000);
+})();
+</script>
+</body>
+</html>

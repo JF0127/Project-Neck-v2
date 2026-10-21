@@ -1,0 +1,18 @@
+{
+  "default_hold": 2.5,
+  "return_to": "attentive",
+  "return_duration": 1.2,
+  "expressions": {
+    "neutral": {"pose": [0, 0, 0], "enter": 1.0},
+    "attentive": {"pose": [0, 2, 0], "enter": 0.8},
+    "thinking": {"pose": [-3, -5, 20], "enter": 1.2},
+    "puzzled": {"pose": [-7, 2, 8], "enter": 0.6},
+    "shy": {"pose": [-5, 7, 12], "enter": 1.2},
+    "agree": {"pose": [0, 2, 0], "enter": 0.6, "gesture": {"type": "nod", "count": 2, "amp": 4.5, "decay": 0.8, "half_period": 0.25, "dir": 1}},
+    "disagree": {"pose": [0, 2, 0], "enter": 0.6, "gesture": {"type": "shake", "count": 3, "amp": 8, "decay": 0.75, "half_period": 0.35, "dir": 1}},
+    "surprised": {"pose": [0, -6, 0], "enter": 0.35},
+    "happy": {"pose": [4, -3, 0], "enter": 0.8, "gesture": {"type": "nod", "count": 1, "amp": 2, "decay": 1.0, "half_period": 0.2, "dir": 1}},
+    "sad": {"pose": [2, 8, 0], "enter": 1.5}
+  },
+  "emphasis": {"type": "nod", "count": 1, "amp": 2, "decay": 1.0, "half_period": 0.2, "dir": 1}
+}
