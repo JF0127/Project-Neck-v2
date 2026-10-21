@@ -1,8 +1,10 @@
 """Realtime expression scheduling on the existing UDP posture stream."""
 
+from bisect import bisect_right
 import csv
 from datetime import datetime
 import json
+import math
 import multiprocessing as mp
 from pathlib import Path
 import queue
@@ -12,13 +14,53 @@ import socket
 import threading
 import time
 
-from speech_motion.render import render
+from speech_motion.render import _min_jerk, render
+
+
+class IdleBreath:
+    def __init__(self, config, started_at):
+        self.config = config
+        self.cycles = [started_at]
+        self.fades = []
+        self.random = random.Random()
+
+    def set_speaking(self, stamp, speaking):
+        # A stop/abort also replaces any not-yet-effective playback state.
+        self.fades = [change for change in self.fades if change[0] < stamp]
+        self.fades.append((stamp, 0.0 if speaking else 1.0))
+
+    def offset(self, stamp):
+        cfg = self.config
+        if not cfg["enabled"] or stamp < self.cycles[0]:
+            return 0.0, 0.0
+        # Cache each cycle once, including skipped cycles; sampling never resamples it.
+        while len(self.cycles) < 2 or stamp >= self.cycles[-1]:
+            period = cfg["period"] * self.random.uniform(
+                1 - cfg["period_jitter"], 1 + cfg["period_jitter"])
+            self.cycles.append(self.cycles[-1] + period)
+        index = bisect_right(self.cycles, stamp) - 1
+        u = (stamp - self.cycles[index]) / (self.cycles[index + 1] - self.cycles[index])
+        weight = target = 1.0
+        changed_at = self.cycles[0]
+        fade = max(cfg["fade"], 1e-6)
+        for at, next_target in self.fades:
+            if at > stamp:
+                break
+            weight += (target - weight) * _min_jerk((at - changed_at) / fade)
+            changed_at, target = at, next_target
+        weight += (target - weight) * _min_jerk((stamp - changed_at) / fade)
+        yaw_axis = cfg.get("axis", "pitch") == "yaw"
+        wave = math.sin(2 * math.pi * u) if yaw_axis else (1 - math.cos(2 * math.pi * u)) / 2
+        offset = cfg["amp"] * wave * weight
+        pitch = cfg.get("pitch_offset", 0.0) * weight
+        return (pitch, offset) if yaw_axis else (pitch + offset, 0.0)
 
 
 def _run(commands, stopped, started_at, start_ramp, library):
     # The parent handles Ctrl+C and asks this process to close its resources.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     config = library["conversation"]
+    breath = IdleBreath(config["idle_breath"], started_at) if config["idle_breath"]["enabled"] else None
     events, pending_emphasis = [], []
     emphasized_turns = set()
     last_sent_target = last_pose_at = float("-inf")
@@ -77,6 +119,23 @@ def _run(commands, stopped, started_at, start_ramp, library):
             nonlocal last_pose_at, current_pose, last_phrase_yaw
             event["requested_at"] = event["t"]
             event["t"] = max(event["t"], last_sent_target + 1 / 30)
+            if event["type"] == "reset":
+                # Freeze the current pose, discarding all old gestures and future events.
+                shifted = [{**old, "t": old["t"] - event["t"]} for old in events]
+                pose = render(shifted, duration=0)[0][1:].tolist()
+                events[:] = [{"t": event["t"] - 1.0, "type": "expr", "name": "neutral",
+                              "pose": pose, "enter": 1e-6, "hold": float("inf")}]
+                for pending in pending_emphasis:
+                    record_event(pending, "emphasis", "skipped", "state_changed")
+                pending_emphasis.clear()
+                if breath is not None:
+                    breath.set_speaking(event["t"], False)
+                event["type"] = "expr"
+            if event["type"] == "idle_breath":
+                if breath is not None:
+                    breath.set_speaking(event["t"], event["speaking"])
+                    record_event(event, name)
+                return
             if name == "emphasis":
                 pending_emphasis.append(event)
                 return
@@ -132,6 +191,12 @@ def _run(commands, stopped, started_at, start_ramp, library):
             # Shift the timeline: render's sole sample at zero is our lookahead.
             shifted = [{**event, "t": event["t"] - stamp} for event in events]
             _, roll, pitch, yaw = render(shifted, duration=0)[0]
+            if breath is not None:
+                pitch_offset, yaw_offset = breath.offset(stamp)
+                pitch += pitch_offset
+                yaw = min(30.0, max(-30.0, yaw + yaw_offset))
+            ramp = _min_jerk((stamp - started_at) / max(start_ramp, 1e-6))
+            pitch = min(8.0, max(-8.0, pitch + config.get("base_pitch", 0.0) * ramp))
             line = f"{stamp:.9f},{roll:.6f},{pitch:.6f},{yaw:.6f}\n"
             udp.sendto(line.encode(), ("127.0.0.1", 9870))
             last_sent_target = max(last_sent_target, stamp)
@@ -184,6 +249,19 @@ class Motion:
         side = self.next_side
         self.next_side = -side
         return side
+
+    def set_speaking(self, t_abs, speaking):
+        cfg = self.config["idle_breath"]
+        if not cfg["enabled"]:
+            return None
+        name = "idle_breath_fade_out" if speaking else "idle_breath_fade_in"
+        with self.lock:
+            self._add_event({"t": t_abs, "type": "idle_breath", "speaking": speaking}, name)
+        return {"weight": 0.0 if speaking else 1.0, "fade_duration": cfg["fade"]}
+
+    def reset(self, t_abs, name="neutral"):
+        with self.lock:
+            self._add_event({"t": t_abs, "type": "reset", "name": name, "hold": float("inf")})
 
     def add_expr(self, t_abs, name, intensity=1.0, side=None, hold=None, playback_at=None):
         cfg = self.config

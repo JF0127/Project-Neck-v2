@@ -5,44 +5,219 @@
       "degrees_per_second": 15.0,
       "return_time": 0.5
     },
-    "speaking": {"min_interval": 1.2},
-    "gestures": {"min_interval": 1.5}
+    "speaking": {
+      "min_interval": 1.2
+    },
+    "gestures": {
+      "min_interval": 1.5
+    }
   },
   "conversation": {
+    "first_play_delay": 0.05,
+    "output_latency": 0.15,
+    "vad_end_silence": 0.4,
+    "tts_prewarm_timeout": 1.0,
+    "base_pitch": 3.0,
+    "idle_breath": {
+      "enabled": true,
+      "axis": "yaw",
+      "amp": 8.0,
+      "period": 8.0,
+      "period_jitter": 0.15,
+      "fade": 1.0,
+      "pitch_offset": 0
+    },
     "gain": 1.0,
     "enter_scale": 1.0,
     "intensity_floor": 0.6,
     "jitter": 0.15,
     "phrase_shift": {
-      "enter": 0.7, "min_interval": 1.5, "lead": 0.15,
+      "enter": 0.7,
+      "min_interval": 1.5,
+      "lead": 0.15,
       "poses": {
-        "center": [0, 0, 0], "left": [0, 0, 7], "right": [0, 0, -7],
-        "left_tilt": [-2.5, 0, 5], "right_tilt": [2.5, 0, -5],
-        "left_down": [0, 1.5, 6], "right_down": [0, 1.5, -6], "chin_up": [0, -1.5, 0]
+        "center": [
+          0,
+          0,
+          0
+        ],
+        "left": [
+          0,
+          0,
+          7
+        ],
+        "right": [
+          0,
+          0,
+          -7
+        ],
+        "left_tilt": [
+          -2.5,
+          0,
+          5
+        ],
+        "right_tilt": [
+          2.5,
+          0,
+          -5
+        ],
+        "left_down": [
+          0,
+          1.5,
+          6
+        ],
+        "right_down": [
+          0,
+          1.5,
+          -6
+        ],
+        "chin_up": [
+          0,
+          -1.5,
+          0
+        ]
       },
       "jitter": 0.2
     },
-    "emphasis": {"enabled": true, "amp": 1.5, "half_period": 0.2, "clear_window": 1.0},
-    "backchannel": {"pause_min": 0.3, "min_interval": 2.5, "amp": 0, "half_period": 0.2},
-    "ack": {"amp": 0, "half_period": 0.2},
+    "emphasis": {
+      "enabled": true,
+      "amp": 1.5,
+      "half_period": 0.2,
+      "clear_window": 1.0
+    },
+    "backchannel": {
+      "pause_min": 0.3,
+      "min_interval": 2.5,
+      "amp": 0,
+      "half_period": 0.2
+    },
+    "ack": {
+      "amp": 0,
+      "half_period": 0.2
+    },
     "thinking_delay": 0.8,
-    "speak_gaze_away": {"yaw": 8, "pitch": 0, "enter": 0.8},
+    "speak_gaze_away": {
+      "yaw": 8,
+      "pitch": 0,
+      "enter": 0.8
+    },
     "look_back_ratio": 0.5
   },
   "default_hold": 2.5,
   "return_to": "attentive",
   "return_duration": 1.2,
   "expressions": {
-    "neutral": {"pose": [0, 0, 0], "enter": 1.0},
-    "attentive": {"pose": [0, 0, 0], "enter": 0.8},
-    "thinking": {"pose": [-2, 0, 12], "enter": 1.2},
-    "puzzled": {"pose": [-7, 2, 8], "enter": 0.6},
-    "shy": {"pose": [-5, 7, 12], "enter": 1.2},
-    "agree": {"pose": [0, 2, 0], "enter": 0.6, "gesture": {"type": "nod", "count": 2, "amp": 4.5, "decay": 0.8, "half_period": 0.25, "dir": 1}},
-    "disagree": {"pose": [0, 2, 0], "enter": 0.6, "gesture": {"type": "shake", "count": 3, "amp": 8, "decay": 0.75, "half_period": 0.35, "dir": 1}},
-    "surprised": {"pose": [0, -6, 0], "enter": 0.35},
-    "happy": {"pose": [4, -3, 0], "enter": 0.8, "gesture": {"type": "nod", "count": 1, "amp": 0, "decay": 1.0, "half_period": 0.2, "dir": 1}},
-    "sad": {"pose": [2, 8, 0], "enter": 1.5}
+    "neutral": {
+      "pose": [
+        0,
+        0,
+        0
+      ],
+      "enter": 1.0
+    },
+    "attentive": {
+      "pose": [
+        0,
+        0,
+        0
+      ],
+      "enter": 0.8
+    },
+    "thinking": {
+      "pose": [
+        -2,
+        0,
+        12
+      ],
+      "enter": 1.2
+    },
+    "puzzled": {
+      "pose": [
+        -7,
+        2,
+        8
+      ],
+      "enter": 0.6
+    },
+    "shy": {
+      "pose": [
+        -5,
+        7,
+        12
+      ],
+      "enter": 1.2
+    },
+    "agree": {
+      "pose": [
+        0,
+        2,
+        0
+      ],
+      "enter": 0.6,
+      "gesture": {
+        "type": "nod",
+        "count": 2,
+        "amp": 4.5,
+        "decay": 0.8,
+        "half_period": 0.25,
+        "dir": 1
+      }
+    },
+    "disagree": {
+      "pose": [
+        0,
+        2,
+        0
+      ],
+      "enter": 0.6,
+      "gesture": {
+        "type": "shake",
+        "count": 3,
+        "amp": 8,
+        "decay": 0.75,
+        "half_period": 0.35,
+        "dir": 1
+      }
+    },
+    "surprised": {
+      "pose": [
+        0,
+        -6,
+        0
+      ],
+      "enter": 0.35
+    },
+    "happy": {
+      "pose": [
+        4,
+        -3,
+        0
+      ],
+      "enter": 0.8,
+      "gesture": {
+        "type": "nod",
+        "count": 1,
+        "amp": 0,
+        "decay": 1.0,
+        "half_period": 0.2,
+        "dir": 1
+      }
+    },
+    "sad": {
+      "pose": [
+        2,
+        8,
+        0
+      ],
+      "enter": 1.5
+    }
   },
-  "emphasis": {"type": "nod", "count": 1, "amp": 2, "decay": 1.0, "half_period": 0.2, "dir": 1}
+  "emphasis": {
+    "type": "nod",
+    "count": 1,
+    "amp": 2,
+    "decay": 1.0,
+    "half_period": 0.2,
+    "dir": 1
+  }
 }

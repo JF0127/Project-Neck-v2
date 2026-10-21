@@ -14,18 +14,25 @@ import sounddevice as sd
 
 from .llm import stream_segments
 from .motion import Motion
-from .tts import SAMPLE_RATE, pcm_chunks
+from .timing import record_timing
+from .tts import SAMPLE_RATE, connect_tts, pcm_chunks
 
 LOGS = Path(__file__).resolve().parents[1] / "logs/dialogue"
 
 
-def new_log(user_text, input_at):
+def new_log(user_text, input_at, config):
     return {"user_text": user_text, "input_at": input_at, "first_segment_at": None,
+            "llm_request_at": None, "llm_first_token_at": None, "llm_done_at": None,
             "segments": [], "expr_events": [], "action_events": [], "errors": [],
-            "thinking_triggered": False}
+            "thinking_triggered": False, "tts_first_preconnected": False,
+            "search_used": False, "searches": [], "search_hint_sent": False,
+            "first_play_delay": config["first_play_delay"],
+            "output_latency": config["output_latency"],
+            "vad_end_silence": config["vad_end_silence"]}
 
 
 def write_log(log, filename=None):
+    record_timing(log)
     filename = log.setdefault("log_file", filename or datetime.now().strftime("%Y%m%d_%H%M%S_%f.json"))
     LOGS.mkdir(parents=True, exist_ok=True)
     (LOGS / filename).write_text(json.dumps(log, ensure_ascii=False, indent=2) + "\n",
@@ -53,6 +60,10 @@ def trigger_action(motion, log, stamp, kind, playback_at=None):
         actual = motion.add_phrase_shift(stamp, playback_at=playback_at)
     elif kind == "emphasis":
         actual = motion.add_emphasis(stamp, log["input_at"])
+    elif kind in ("idle_breath_fade_out", "idle_breath_fade_in"):
+        actual = motion.set_speaking(stamp, kind == "idle_breath_fade_out")
+        if actual is None:
+            return None
     else:
         actual = motion.add_nod(stamp, kind)
         if actual["duration"] == 0:
@@ -65,6 +76,8 @@ def trigger_action(motion, log, stamp, kind, playback_at=None):
 def _run_async(work, stop):
     """Give each network worker a cancellable event loop in its own thread."""
     async def run():
+        if stop.is_set():
+            return
         task = asyncio.create_task(work())
         while not task.done() and not stop.is_set():
             await asyncio.sleep(0.02)
@@ -78,7 +91,83 @@ def _run_async(work, stop):
     asyncio.run(run())
 
 
-def _playback(audio, stop, motion, log):
+class TTSWorker:
+    def __init__(self, log, config):
+        self.log, self.config = log, config
+        self.text, self.audio = queue.Queue(), queue.Queue()
+        self.stop = threading.Event()
+        self.lock = threading.RLock()
+        self.stream = None
+        self.thread = threading.Thread(target=self._run, name="dialogue-tts")
+        self.thread.start()
+
+    def _run(self):
+        try:
+            _run_async(self._synthesize, self.stop)
+        except Exception as exc:
+            self.log["errors"].append(f"{type(exc).__name__}: {exc}")
+            self.stop.set()
+
+    async def _synthesize(self):
+        preconnect = asyncio.create_task(connect_tts(self.config["tts_prewarm_timeout"]))
+        try:
+            while not self.stop.is_set():
+                try:
+                    segment = self.text.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(0.01)
+                    continue
+                with self.lock:
+                    if self.stop.is_set():
+                        return
+                    if segment is None:
+                        self.audio.put(None)
+                        return
+                    segment["tts_request_at"] = time.monotonic()
+                async for chunk in pcm_chunks(segment["text"], preconnect=preconnect,
+                                              log=self.log if preconnect is not None else None):
+                    with self.lock:
+                        if self.stop.is_set():
+                            return
+                        stamp = time.monotonic()
+                        if segment["tts_first_packet_at"] is None:
+                            segment["tts_first_packet_at"] = stamp
+                        segment["tts_done_at"] = stamp
+                        segment["tts_samples"] += len(chunk) // 2
+                        segment["tts_pcm_duration_s"] = segment["tts_samples"] / SAMPLE_RATE
+                        self.audio.put((segment, np.frombuffer(chunk, dtype="<i2")))
+                preconnect = None
+                if segment["tts_first_packet_at"] is None:
+                    raise RuntimeError("Doubao returned no PCM for a segment")
+                segment["tts_end_at"] = time.monotonic()
+        finally:
+            if preconnect is not None:
+                preconnect.cancel()
+                result = (await asyncio.gather(preconnect, return_exceptions=True))[0]
+                if not isinstance(result, BaseException):
+                    await result.close()
+
+    def cancel(self):
+        with self.lock:
+            self.stop.set()
+            if self.stream is not None:
+                self.stream.abort()
+            for pending in (self.text, self.audio):
+                while True:
+                    try:
+                        pending.get_nowait()
+                    except queue.Empty:
+                        break
+
+    def close(self):
+        self.cancel()
+        self.thread.join()
+
+
+def _playback(tts, motion, log):
+    audio, stop = tts.audio, tts.stop
+    if stop.is_set():
+        return
     events = queue.Queue()
     finished = threading.Event()
     exhausted = threading.Event()
@@ -87,10 +176,11 @@ def _playback(audio, stop, motion, log):
     tail_remaining, tail_written = None, 0
     clock_offset = 0.0
     safe_to_close = False
+    speech_end_at, breath_resumed = None, False
 
     def callback(out, frames, timing, status):
         nonlocal current, used, started, segment_samples, look_back_sent
-        nonlocal tail_remaining, tail_written
+        nonlocal tail_remaining, tail_written, speech_end_at
         out.fill(0)
         if stop.is_set():
             raise sd.CallbackAbort
@@ -118,6 +208,8 @@ def _playback(audio, stop, motion, log):
                 except queue.Empty:
                     return  # Silence on network starvation; never drop queued PCM.
                 if current is None:
+                    if started:
+                        speech_end_at = log["playback_dac_end_at"]
                     tail_remaining = round(0.3 * SAMPLE_RATE) if started else 0
                     continue
                 used = 0
@@ -128,7 +220,7 @@ def _playback(audio, stop, motion, log):
                 return
             if not started:
                 ready = max(segment["tts_first_packet_at"], segment["boundary_known_at"],
-                            segment["tts_end_at"] if segment["is_last"] else 0) + 0.3
+                            segment["tts_end_at"] if segment["is_last"] else 0) + motion.config["first_play_delay"]
                 pos = max(pos, round((ready - dac) * SAMPLE_RATE))
                 if pos >= frames:
                     return
@@ -137,7 +229,11 @@ def _playback(audio, stop, motion, log):
                 stamp = dac + pos / SAMPLE_RATE
                 segment["playback_start_at"] = stamp
                 segment_samples = 0
-                if segment["expr"] != "none":
+                if not started:
+                    events.put((stamp, "idle_breath_fade_out", "", 1.0, stamp))
+                if segment.get("search_hint"):
+                    pass  # Keep thinking while the fixed search notice is playing.
+                elif segment["expr"] != "none":
                     events.put((stamp - 0.25, "expr", segment["expr"], segment["intensity"], stamp))
                 elif not started:
                     events.put((stamp, "speak_gaze_away", "", 1.0, stamp))
@@ -152,6 +248,8 @@ def _playback(audio, stop, motion, log):
                     stamp = dac + (pos + target - segment_samples) / SAMPLE_RATE
                     events.put((stamp, "look_back", "", 1.0, segment["playback_start_at"]))
                     look_back_sent = True
+            if segment["queued_at"] is None:
+                segment["queued_at"] = time.monotonic()
             out[pos:pos + count, 0] = pcm[used:used + count]
             started = True
             pos += count
@@ -163,9 +261,7 @@ def _playback(audio, stop, motion, log):
             if used == len(pcm):
                 current = None
 
-    # A 300 ms output buffer lets the callback report DAC times before the
-    # corresponding expression deadlines (250 ms before the first sample).
-    requested_latency = 0.3
+    requested_latency = motion.config["output_latency"]
     stream = sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16",
                              blocksize=160, latency=requested_latency, callback=callback,
                              finished_callback=finished.set)
@@ -180,27 +276,39 @@ def _playback(audio, stop, motion, log):
         before = time.monotonic()
         audio_clock = stream.time
         clock_offset = (before + time.monotonic()) / 2 - audio_clock
-        stream.start()
+        with tts.lock:
+            if stop.is_set():
+                return
+            tts.stream = stream
+            stream.start()
         while not stop.is_set():
-            while True:
-                try:
-                    stamp, kind, name, intensity, playback_at = events.get_nowait()
-                except queue.Empty:
+            with tts.lock:
+                if stop.is_set():
                     break
-                # Submit immediately; the motion process keeps the effective deadline.
-                if kind == "expr":
-                    trigger_expr(motion, log, stamp, name, intensity, playback_at=playback_at)
-                else:
-                    trigger_action(motion, log, stamp, kind, playback_at=playback_at)
-            now = time.monotonic()
-            if (exhausted.is_set() and now >= log["playback_safe_after"]
-                    and events.empty()):
-                safe_to_close = True
-                break
-            if finished.is_set():
-                raise RuntimeError("audio stream stopped before the DAC drain deadline")
+                while True:
+                    try:
+                        stamp, kind, name, intensity, playback_at = events.get_nowait()
+                    except queue.Empty:
+                        break
+                    # Submit immediately; the motion process keeps the effective deadline.
+                    if kind == "expr":
+                        trigger_expr(motion, log, stamp, name, intensity, playback_at=playback_at)
+                    else:
+                        trigger_action(motion, log, stamp, kind, playback_at=playback_at)
+                now = time.monotonic()
+                if speech_end_at is not None and now >= speech_end_at and not breath_resumed:
+                    trigger_action(motion, log, speech_end_at, "idle_breath_fade_in")
+                    breath_resumed = True
+                if (exhausted.is_set() and now >= log["playback_safe_after"]
+                        and events.empty()):
+                    safe_to_close = True
+                    break
+                if finished.is_set():
+                    raise RuntimeError("audio stream stopped before the DAC drain deadline")
             stop.wait(0.005)
     finally:
+        with tts.lock:
+            tts.stream = None
         if safe_to_close and not stop.is_set():
             stream.stop()
             log["playback_drained_at"] = time.monotonic()
@@ -208,6 +316,8 @@ def _playback(audio, stop, motion, log):
             stream.abort()
             aborted_at = time.monotonic()
             log["playback_aborted_at"] = aborted_at
+            if started and not breath_resumed and not log.get("interrupted"):
+                trigger_action(motion, log, aborted_at, "idle_breath_fade_in")
             for segment in log["segments"]:
                 start = segment["playback_start_at"]
                 if start is not None:
@@ -218,58 +328,58 @@ def _playback(audio, stop, motion, log):
         stream.close()
 
 
-def run_turn(user_text, input_at, motion, *, log=None, thinking=True, on_complete=None):
+def run_turn(user_text, input_at, motion, *, log=None, thinking=True, on_complete=None, tts=None):
     """Shared text/voice reply pipeline; on_complete runs after playback is drained."""
     if log is None:
-        log = new_log(user_text, input_at)
+        log = new_log(user_text, input_at, motion.config)
+        log["vad_end_silence"] = None  # Text input does not use VAD.
     log.update(user_text=user_text, input_at=input_at)
-    if thinking:
-        trigger_expr(motion, log, input_at, "thinking")
+    if tts is None:
+        tts = TTSWorker(log, motion.config)
     filename = datetime.now().strftime("%Y%m%d_%H%M%S_%f.json")
-    text, audio = queue.Queue(), queue.Queue()
-    stop = threading.Event()
+    text, stop = tts.text, tts.stop
 
-    async def generate():
-        async for value in stream_segments(user_text):
+    def enqueue(value):
+        with tts.lock:
+            if stop.is_set():
+                raise asyncio.CancelledError
             stamp = time.monotonic()
-            if log["first_segment_at"] is None:
-                log["first_segment_at"] = stamp
-            if log["segments"]:
+            if log["segments"] and log["segments"][-1]["is_last"] is None:
                 log["segments"][-1]["boundary_known_at"] = stamp
                 log["segments"][-1]["is_last"] = False
-            segment = {**value, "arrived_at": stamp, "tts_first_packet_at": None,
+            segment = {**value, "arrived_at": stamp, "tts_request_at": None,
+                       "tts_first_packet_at": None, "tts_done_at": None,
                        "tts_end_at": None, "tts_samples": 0, "is_last": None,
                        "tts_pcm_duration_s": 0.0, "written_pcm_duration_s": 0.0,
-                       "boundary_known_at": None, "playback_start_at": None,
-                       "playback_end_at": None}
+                       "boundary_known_at": None, "queued_at": None,
+                       "playback_start_at": None, "playback_end_at": None}
+            if value.get("search_hint"):
+                segment.update(is_last=False, boundary_known_at=stamp)
             log["segments"].append(segment)
             text.put(segment)
             print(segment["text"], end="", flush=True)
-        if log["segments"]:
-            log["segments"][-1]["boundary_known_at"] = time.monotonic()
-            log["segments"][-1]["is_last"] = True
-        text.put(None)
 
-    async def synthesize():
-        while True:
-            try:
-                segment = text.get_nowait()
-            except queue.Empty:
-                await asyncio.sleep(0.01)
-                continue
-            if segment is None:
-                audio.put(None)
+    def search_feedback():
+        with tts.lock:
+            if stop.is_set():
                 return
-            async for chunk in pcm_chunks(segment["text"]):
-                if segment["tts_first_packet_at"] is None:
-                    segment["tts_first_packet_at"] = time.monotonic()
-                segment["tts_samples"] += len(chunk) // 2
-                segment["tts_pcm_duration_s"] = segment["tts_samples"] / SAMPLE_RATE
-                audio.put((segment, np.frombuffer(chunk, dtype="<i2")))
-            if segment["tts_first_packet_at"] is None:
-                raise RuntimeError("Doubao returned no PCM for a segment")
-            segment["tts_end_at"] = time.monotonic()
-            # Immediately synthesize the next segment, without waiting for playback.
+            if not log["expr_events"] or log["expr_events"][-1]["name"] != "thinking":
+                trigger_expr(motion, log, time.monotonic(), "thinking", hold=float("inf"))
+            if not log["search_hint_sent"]:
+                log["search_hint_sent"] = True
+                enqueue({"text": "稍等，我查一下。", "expr": "none", "intensity": 0.0,
+                         "emphasis": False, "search_hint": True})
+
+    async def generate():
+        async for value in stream_segments(user_text, log=log, on_tool=search_feedback):
+            enqueue(value)
+        with tts.lock:
+            if stop.is_set():
+                return
+            if log["segments"]:
+                log["segments"][-1]["boundary_known_at"] = time.monotonic()
+                log["segments"][-1]["is_last"] = True
+            text.put(None)
 
     def worker(work):
         try:
@@ -281,14 +391,17 @@ def run_turn(user_text, input_at, motion, *, log=None, thinking=True, on_complet
     workers = [
         threading.Thread(target=worker, args=(lambda: _run_async(generate, stop),),
                          name="dialogue-llm"),
-        threading.Thread(target=worker, args=(lambda: _run_async(synthesize, stop),),
-                         name="dialogue-tts"),
-        threading.Thread(target=worker, args=(lambda: _playback(audio, stop, motion, log),),
+        threading.Thread(target=worker, args=(lambda: _playback(tts, motion, log),),
                          name="dialogue-playback"),
     ]
-    started = []
-    print("机器人：", end="", flush=True)
+    started = [tts.thread]
     try:
+        with tts.lock:
+            if stop.is_set():
+                return log
+            print("机器人：", end="", flush=True)
+            if thinking:
+                trigger_expr(motion, log, input_at, "thinking")
         for thread in workers:
             thread.start()
             started.append(thread)
@@ -305,8 +418,8 @@ def run_turn(user_text, input_at, motion, *, log=None, thinking=True, on_complet
             if on_complete is not None and not log.get("interrupted"):
                 on_complete(log)
         finally:
-            write_log(log, filename)
             print()
+            write_log(log, filename)
     for error in log["errors"]:
         print(error, file=sys.stderr)
     return log

@@ -35,14 +35,19 @@ def parse_frame(message):
     return event, payload, end
 
 
-async def pcm_chunks(reply_text):
-    """Yield 16 kHz mono, little-endian PCM16 byte chunks."""
+async def connect_tts(timeout=15):
     key = os.environ.get("VOLCENGINE_TTS_API_KEY", "").strip()
     if not key:
         raise ValueError("VOLCENGINE_TTS_API_KEY is required")
-    speaker = os.environ.get("VOLCENGINE_TTS_SPEAKER", "").strip() or DEFAULT_DOUBAO_SPEAKER
     headers = {"X-Api-Key": key, "X-Api-Resource-Id": DOUBAO_RESOURCE_ID,
                "X-Api-Request-Id": str(uuid.uuid4())}
+    return await websockets.connect(URL, additional_headers=headers, open_timeout=timeout,
+                                    close_timeout=1, max_size=None)
+
+
+async def pcm_chunks(reply_text, preconnect=None, log=None):
+    """Yield 16 kHz mono PCM, optionally using a handshake started on this loop."""
+    speaker = os.environ.get("VOLCENGINE_TTS_SPEAKER", "").strip() or DEFAULT_DOUBAO_SPEAKER
     request = {"user": {"uid": "project-neck"}, "req_params": {
         "text": reply_text, "speaker": speaker,
         "audio_params": {"format": "pcm", "sample_rate": SAMPLE_RATE,
@@ -50,9 +55,25 @@ async def pcm_chunks(reply_text):
         "additions": json.dumps({"disable_markdown_filter": True}, ensure_ascii=False),
     }}
     data = json.dumps(request, ensure_ascii=False).encode()
-    async with websockets.connect(URL, additional_headers=headers, open_timeout=15,
-                                  close_timeout=1, max_size=None) as ws:
-        await ws.send(b"\x11\x10\x10\x00" + struct.pack(">I", len(data)) + data)
+    packet = b"\x11\x10\x10\x00" + struct.pack(">I", len(data)) + data
+    ws = None
+    try:
+        if preconnect is not None:
+            try:
+                ws = await preconnect
+            except Exception:
+                pass  # Failed or timed-out warmup: establish a normal connection below.
+        if ws is not None:
+            try:
+                await ws.send(packet)
+            except Exception:
+                await ws.close()
+                ws = None
+        if ws is None:
+            ws = await connect_tts()
+            await ws.send(packet)
+        elif log is not None:
+            log["tts_first_preconnected"] = True
         completed = False
         while not completed:
             message = await asyncio.wait_for(ws.recv(), 60)
@@ -66,3 +87,6 @@ async def pcm_chunks(reply_text):
                 elif event == 152:
                     # Finish this entire batch before leaving the receive loop.
                     completed = True
+    finally:
+        if ws is not None:
+            await ws.close()
