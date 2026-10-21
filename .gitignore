@@ -1,4 +1,5 @@
 /bridge_wavs/
+/logs/
 /motor/build/
 /motor/data/sweep/
 /motor/data/analysis/
@@ -6,3 +7,4 @@ __pycache__/
 /.venv/
 
 # 保留 motor/data/demos/，不要忽略整个 motor/data/。
+.venv/

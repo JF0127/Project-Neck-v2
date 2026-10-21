@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from numpy.polynomial.polynomial import polyder, polyval
 
 
 def _min_jerk(x):
@@ -13,7 +14,7 @@ def _min_jerk(x):
 
 
 def _gesture_duration(gesture):
-    if gesture is None:
+    if gesture is None or (gesture["type"] == "nod" and gesture["amp"] == 0):
         return 0.0
     segments = 2 * gesture["count"] if gesture["type"] == "nod" else gesture["count"] + 1
     return segments * gesture["half_period"]
@@ -34,7 +35,7 @@ def render(events, duration, fps=30, seed=0):
         if event["type"] != "expr":
             continue
         spec = expressions[event["name"]]
-        stamp = (event["t"] + spec["enter"] + _gesture_duration(spec.get("gesture"))
+        stamp = (event["t"] + event.get("enter", spec["enter"]) + _gesture_duration(spec.get("gesture"))
                  + event.get("hold", library["default_hold"]))
         if stamp < next_expr:
             returns.append({"t": stamp, "type": "_expr_return", "name": library["return_to"],
@@ -49,17 +50,19 @@ def render(events, duration, fps=30, seed=0):
             spec = expressions[event["name"]]
             if "gesture" not in spec:
                 continue
-            stamp += spec["enter"]
+            stamp += event.get("enter", spec["enter"])
             event = {**spec["gesture"],
                      "amp": spec["gesture"]["amp"] * event.get("intensity", 1.0)}
         elif kind == "emphasis":
             event = library["emphasis"]
-        elif kind in ("nod", "shake"):
-            if stamp - last_gesture < specs["min_interval"]:
+        elif kind not in ("nod", "shake"):
+            continue
+        if event["type"] == "nod" and event.get("amp", 5) == 0:
+            continue
+        if kind in ("nod", "shake"):
+            if not event.get("force", False) and stamp - last_gesture < specs["min_interval"]:
                 continue
             last_gesture = stamp
-        else:
-            continue
         kind = event["type"]
         defaults = (2, 5, 0.7, 0.3, 1) if kind == "nod" else (3, 8, 0.75, 0.5, 1)
         count, amp, decay, step, direction = (
@@ -83,6 +86,7 @@ def render(events, duration, fps=30, seed=0):
     last_shift = -np.inf
     move_start, move_duration = 0.0, 1.0
     origin = target = np.zeros(3)
+    coefficients = np.zeros((6, 3))
     while pending:
         stamp, index, event = heapq.heappop(pending)
         if event["type"] == "shift":
@@ -99,7 +103,14 @@ def render(events, duration, fps=30, seed=0):
                 continue
             last_shift = stamp
 
-        origin = origin + (target - origin) * _min_jerk((stamp - move_start) / move_duration)
+        u = (stamp - move_start) / move_duration
+        origin = polyval(np.clip(u, 0.0, 1.0), coefficients)
+        velocity = acceleration = np.zeros(3)
+        if 0.0 <= u < 1.0:
+            velocity = polyval(u, polyder(coefficients)) / move_duration
+            acceleration = polyval(u, polyder(coefficients, 2)) / move_duration ** 2
+        elif u >= 1.0:
+            origin = target.copy()  # A completed transition holds with zero derivatives.
         if event["type"] == "shift":
             target = np.array([event["pitch"], event["yaw"], event.get("roll", 0)])
             move_duration = (transition["base_time"]
@@ -107,17 +118,26 @@ def render(events, duration, fps=30, seed=0):
         elif event["type"] in ("expr", "_expr_return"):
             spec = expressions[event["name"]]
             side = event.get("side", 1)
-            target = (np.array(spec["pose"])[[1, 2, 0]] * event.get("intensity", 1.0)
-                      * [1, side, side])
-            move_duration = (spec["enter"] if event["type"] == "expr"
+            target = (np.array(event.get("pose", spec["pose"]))[[1, 2, 0]]
+                      * event.get("intensity", 1.0) * [1, side, side])
+            move_duration = (event.get("enter", spec["enter"]) if event["type"] == "expr"
                              else library["return_duration"])
         else:
             target = np.zeros(3)
             move_duration = transition["return_time"]
+        # Quintic in normalized time u: preserve initial p/v/a, end at target
+        # with zero v/a. For zero initial v/a this is the usual min-jerk curve.
+        delta = target - origin
+        v = velocity * move_duration
+        a = acceleration * move_duration ** 2 / 2
+        coefficients = np.array([origin, v, a, 10 * delta - 6 * v - 3 * a,
+                                 -15 * delta + 8 * v + 3 * a, 6 * delta - 3 * v - a])
         move_start = stamp
         active = times >= stamp
-        gain = _min_jerk((times[active] - stamp) / move_duration)
-        result[active, 1:] = (origin + (target - origin) * gain[:, None])[:, [2, 0, 1]]
+        u = np.clip((times[active] - stamp) / move_duration, 0.0, 1.0)
+        poses = polyval(u, coefficients).T
+        poses[u >= 1.0] = target
+        result[active, 1:] = poses[:, [2, 0, 1]]
 
     for start, kind, values, step in gestures:
         u = (times - start) / step
