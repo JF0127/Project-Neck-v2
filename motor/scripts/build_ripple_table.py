@@ -2,14 +2,27 @@
 """从多次 NeckSweepMit 的 _fb.csv 建立输出轴力矩波动补偿表。"""
 
 import argparse
+import builtins
 import json
 from pathlib import Path
 import re
+import sys
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "third_party/probe"))
+from probe import probe
+
 STEP, PERIOD, BINS = 0.02, 10.0, 500
 SPEED_STEP = np.degrees(36 / 4095)  # MIT 指令速度量化；零速解码约为 -0.252°/s。
+
+
+def print(*args, **kwargs):
+    builtins.print(*args, **kwargs)
+    try:
+        probe("ripple_build_report", " ".join(map(str, args)))
+    except Exception:
+        pass
 
 
 def spans(mask):
@@ -107,6 +120,7 @@ def main():
         output.write_text(json.dumps({"motors": motors}, ensure_ascii=False, allow_nan=False) + "\n")
         print(f"已写入 {output}")
     except (OSError, ValueError, KeyError) as exc:
+        probe("ripple_build_report", f"建表失败：{exc}")
         parser.exit(1, f"建表失败：{exc}\n")
 
 

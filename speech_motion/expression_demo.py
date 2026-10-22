@@ -4,7 +4,11 @@ import argparse
 import json
 from pathlib import Path
 import socket
+import sys
 import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party/probe"))
+from probe import probe
 
 if __package__:
     from .render import _gesture_duration, render
@@ -38,7 +42,10 @@ def main():
     for name in args.names:
         add(name, args.hold)
         add("neutral", args.gap)
+    probe("demonstration_events", json.dumps(events, ensure_ascii=False))
     samples = render(events, duration, fps=30)
+    for probe_sample in samples:
+        probe("demonstration_pose_samples", probe_sample[1:].tolist())
 
     # Send samples 0.3 s ahead; print names at their actual playback times.
     actions = [(event["t"], event["name"], None) for event in events]
@@ -53,6 +60,7 @@ def main():
                 t, roll, pitch, yaw = sample
                 line = f"{start + t:.9f},{roll:.6f},{pitch:.6f},{yaw:.6f}\n"
                 sock.sendto(line.encode(), ("127.0.0.1", args.port))
+                probe("head_pose_udp_demo", [float(roll), float(pitch), float(yaw)])
         time.sleep(max(0.0, start + duration - time.monotonic()))
 
 

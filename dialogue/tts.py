@@ -3,10 +3,16 @@
 import asyncio
 import json
 import os
+from pathlib import Path
 import struct
+import sys
 import uuid
 
+import numpy as np
 import websockets
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party/probe"))
+from probe import probe
 
 URL = "wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream"
 DOUBAO_RESOURCE_ID = "seed-tts-2.0"
@@ -56,6 +62,7 @@ async def pcm_chunks(reply_text, preconnect=None, log=None):
     }}
     data = json.dumps(request, ensure_ascii=False).encode()
     packet = b"\x11\x10\x10\x00" + struct.pack(">I", len(data)) + data
+    probe("synthesis_request_packet", len(packet))
     ws = None
     try:
         if preconnect is not None:
@@ -83,6 +90,8 @@ async def pcm_chunks(reply_text, preconnect=None, log=None):
                 if event == 352:
                     if not payload or len(payload) % 2:
                         raise ValueError("invalid Doubao PCM chunk")
+                    probe("synthesized_pcm_received", float(np.sqrt(np.mean(
+                        (np.frombuffer(payload, dtype="<i2").astype(np.float64) / 32768.0) ** 2))))
                     yield payload
                 elif event == 152:
                     # Finish this entire batch before leaving the receive loop.

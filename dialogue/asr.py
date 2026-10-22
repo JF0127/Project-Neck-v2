@@ -2,8 +2,12 @@
 
 import os
 from pathlib import Path
+import sys
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party/probe"))
+from probe import probe
 
 DEFAULT_MODEL_PATH = "~/projects/Project-Neck/dataset/models/qwen"
 
@@ -20,6 +24,7 @@ class QwenASR:
         self.state = None
 
     def start(self):
+        probe("recognition_lifecycle", "start")
         self.state = self.model.init_streaming_state(
             language="Chinese", chunk_size_sec=1.0,
             unfixed_chunk_num=4, unfixed_token_num=5,
@@ -30,16 +35,20 @@ class QwenASR:
             raise RuntimeError("ASR speech segment has not been started")
         if pcm_frame:
             waveform = np.frombuffer(pcm_frame, dtype="<i2").astype(np.float32) / 32768.0
+            probe("speech_pcm_forwarded", float(np.sqrt(np.mean(waveform.astype(np.float64) ** 2))))
             self.model.streaming_transcribe(waveform, self.state)
 
     def finish(self):
+        probe("recognition_lifecycle", "finish")
         state, self.state = self.state, None
         if state is None:
             return ""
         self.model.finish_streaming_transcribe(state)
+        probe("recognized_text_final", state.text.strip())
         return state.text.strip()
 
     def close(self):
+        probe("recognition_lifecycle", "close")
         self.state = None
         # qwen-asr 0.0.6 wraps vLLM 0.14.0; stop its engine processes and I/O threads.
         self.model.model.llm_engine.engine_core.shutdown()

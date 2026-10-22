@@ -11,17 +11,21 @@ import queue
 import random
 import signal
 import socket
+import sys
 import threading
 import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party/probe"))
+from probe import probe
 
 from speech_motion.render import _min_jerk, render
 
 
 class IdleBreath:
-    def __init__(self, config, started_at):
-        self.config = config
-        self.cycles = [started_at]
-        self.fades = []
+    def __init__(self, config, started_at, scale=1.0):
+        self.config, self.started_at, self.scale = config, started_at, scale
+        self.fades, self.listening = [], []
+        self.yaw_points = [(0.0, 0.0)]
         self.random = random.Random()
 
     def set_speaking(self, stamp, speaking):
@@ -29,38 +33,56 @@ class IdleBreath:
         self.fades = [change for change in self.fades if change[0] < stamp]
         self.fades.append((stamp, 0.0 if speaking else 1.0))
 
+    def set_listening(self, stamp, listening):
+        self.listening = [change for change in self.listening if change[0] < stamp]
+        self.listening.append((stamp, float(listening)))
+
     def offset(self, stamp):
         cfg = self.config
-        if not cfg["enabled"] or stamp < self.cycles[0]:
+        if not cfg["enabled"] or stamp < self.started_at or self.scale == 0:
             return 0.0, 0.0
-        # Cache each cycle once, including skipped cycles; sampling never resamples it.
-        while len(self.cycles) < 2 or stamp >= self.cycles[-1]:
-            period = cfg["period"] * self.random.uniform(
-                1 - cfg["period_jitter"], 1 + cfg["period_jitter"])
-            self.cycles.append(self.cycles[-1] + period)
-        index = bisect_right(self.cycles, stamp) - 1
-        u = (stamp - self.cycles[index]) / (self.cycles[index + 1] - self.cycles[index])
-        weight = target = 1.0
-        changed_at = self.cycles[0]
+        elapsed = stamp - self.started_at
+        # Cache random holds and moves so repeated sampling keeps the same path.
+        while elapsed >= self.yaw_points[-1][0]:
+            at, origin = self.yaw_points[-1]
+            start = at + self.random.uniform(4, 10)
+            if origin and self.random.random() < 0.5:
+                target = 0.0
+            else:
+                step = self.random.uniform(4, 6) * self.random.choice((-1, 1))
+                target = origin + step
+                if abs(target) > 8:
+                    target = origin - step
+            end = start + abs(target - origin) * self.scale / 6
+            self.yaw_points.extend(((start, origin), (end, target)))
+        index = bisect_right(self.yaw_points, (elapsed, float("inf"))) - 1
+        start, origin = self.yaw_points[index]
+        end, target = self.yaw_points[index + 1]
+        yaw = origin + (target - origin) * _min_jerk((elapsed - start) / (end - start))
+        pitch = math.sin(2 * math.pi * elapsed / 4.3) + math.sin(2 * math.pi * elapsed / 7.1)
+        weights = []
         fade = max(cfg["fade"], 1e-6)
-        for at, next_target in self.fades:
-            if at > stamp:
-                break
-            weight += (target - weight) * _min_jerk((at - changed_at) / fade)
-            changed_at, target = at, next_target
-        weight += (target - weight) * _min_jerk((stamp - changed_at) / fade)
-        yaw_axis = cfg.get("axis", "pitch") == "yaw"
-        wave = math.sin(2 * math.pi * u) if yaw_axis else (1 - math.cos(2 * math.pi * u)) / 2
-        offset = cfg["amp"] * wave * weight
-        pitch = cfg.get("pitch_offset", 0.0) * weight
-        return (pitch, offset) if yaw_axis else (pitch + offset, 0.0)
+        for changes, initial in ((self.fades, 1.0), (self.listening, 0.0)):
+            weight = target = initial
+            changed_at = self.started_at
+            for at, next_target in changes:
+                if at > stamp:
+                    break
+                weight += (target - weight) * _min_jerk((at - changed_at) / fade)
+                changed_at, target = at, next_target
+            weights.append(weight + (target - weight) * _min_jerk((stamp - changed_at) / fade))
+        weight, listening = weights
+        return (pitch * self.scale * weight * (1 - 0.5 * listening),
+                yaw * self.scale * weight * (1 - listening))
 
 
 def _run(commands, stopped, started_at, start_ramp, library):
     # The parent handles Ctrl+C and asks this process to close its resources.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     config = library["conversation"]
-    breath = IdleBreath(config["idle_breath"], started_at) if config["idle_breath"]["enabled"] else None
+    idle_scale = library.get("idle_scale", 1.0)
+    breath = (IdleBreath(config["idle_breath"], started_at, idle_scale)
+              if config["idle_breath"]["enabled"] else None)
     events, pending_emphasis = [], []
     emphasized_turns = set()
     last_sent_target = last_pose_at = float("-inf")
@@ -120,20 +142,26 @@ def _run(commands, stopped, started_at, start_ramp, library):
             event["requested_at"] = event["t"]
             event["t"] = max(event["t"], last_sent_target + 1 / 30)
             if event["type"] == "reset":
-                # Freeze the current pose, discarding all old gestures and future events.
-                shifted = [{**old, "t": old["t"] - event["t"]} for old in events]
-                pose = render(shifted, duration=0)[0][1:].tolist()
-                events[:] = [{"t": event["t"] - 1.0, "type": "expr", "name": "neutral",
-                              "pose": pose, "enter": 1e-6, "hold": float("inf")}]
+                # Keep the old trajectory for p/v/a continuity; discard future events.
+                events[:] = [old for old in events if old["t"] < event["t"]]
                 for pending in pending_emphasis:
                     record_event(pending, "emphasis", "skipped", "state_changed")
                 pending_emphasis.clear()
                 if breath is not None:
                     breath.set_speaking(event["t"], False)
                 event["type"] = "expr"
-            if event["type"] == "idle_breath":
+            elif event.get("clear_gestures", False):
+                events[:] = [old for old in events if old["t"] < event["t"]
+                             or old["type"] not in ("nod", "shake", "emphasis")]
+                for pending in pending_emphasis:
+                    record_event(pending, "emphasis", "skipped", "state_changed")
+                pending_emphasis.clear()
+            if event["type"] in ("idle_breath", "idle_listening"):
                 if breath is not None:
-                    breath.set_speaking(event["t"], event["speaking"])
+                    if event["type"] == "idle_breath":
+                        breath.set_speaking(event["t"], event["speaking"])
+                    else:
+                        breath.set_listening(event["t"], event["listening"])
                     record_event(event, name)
                 return
             if name == "emphasis":
@@ -190,15 +218,19 @@ def _run(commands, stopped, started_at, start_ramp, library):
                 pending_emphasis.remove(event)
             # Shift the timeline: render's sole sample at zero is our lookahead.
             shifted = [{**event, "t": event["t"] - stamp} for event in events]
+            probe("scheduled_motion_events", json.dumps(shifted, ensure_ascii=False))
             _, roll, pitch, yaw = render(shifted, duration=0)[0]
+            probe("rendered_head_pose", [float(roll), float(pitch), float(yaw)])
             if breath is not None:
                 pitch_offset, yaw_offset = breath.offset(stamp)
                 pitch += pitch_offset
                 yaw = min(30.0, max(-30.0, yaw + yaw_offset))
             ramp = _min_jerk((stamp - started_at) / max(start_ramp, 1e-6))
-            pitch = min(8.0, max(-8.0, pitch + config.get("base_pitch", 0.0) * ramp))
+            pitch = min(max(8.0, 12 * idle_scale),
+                        max(-8.0, pitch + config.get("base_pitch", 0.0) * ramp))
             line = f"{stamp:.9f},{roll:.6f},{pitch:.6f},{yaw:.6f}\n"
             udp.sendto(line.encode(), ("127.0.0.1", 9870))
+            probe("head_pose_udp_live", [float(roll), float(pitch), float(yaw)])
             last_sent_target = max(last_sent_target, stamp)
             sent_at, unix_s = time.monotonic(), time.time()
             writer.writerow(("send", f"{sent_at:.9f}", f"{stamp:.9f}", f"{roll:.6f}",
@@ -232,6 +264,9 @@ class Motion:
     def _add_event(self, event, name=None, playback_at=None):
         if playback_at is not None:
             event["playback_at"] = playback_at
+        probe("playback_action_events" if playback_at is not None or event["type"] == "idle_breath"
+              else "conversation_action_events",
+              f"{name or event['name']}: {json.dumps(event, ensure_ascii=False)}")
         self.commands.put((event, name or event["name"]))
 
     def start(self):
@@ -259,11 +294,27 @@ class Motion:
             self._add_event({"t": t_abs, "type": "idle_breath", "speaking": speaking}, name)
         return {"weight": 0.0 if speaking else 1.0, "fade_duration": cfg["fade"]}
 
-    def reset(self, t_abs, name="neutral"):
+    def set_listening(self, t_abs, listening):
         with self.lock:
-            self._add_event({"t": t_abs, "type": "reset", "name": name, "hold": float("inf")})
+            self._add_event({"t": t_abs, "type": "idle_listening", "listening": listening},
+                            "idle_listening")
 
-    def add_expr(self, t_abs, name, intensity=1.0, side=None, hold=None, playback_at=None):
+    def reset(self, t_abs, name="neutral", clear_gestures=True, enter=None):
+        with self.lock:
+            self._add_event({"t": t_abs, "type": "reset", "name": name,
+                             "enter": self.library["expressions"][name]["enter"] if enter is None else enter,
+                             "hold": float("inf"), "clear_gestures": clear_gestures})
+
+    def add_idle(self, t_abs, name, intensity=1.0, side=None):
+        intensity = min(1.0, max(0.3, intensity))
+        with self.lock:
+            side = random.choice((-1, 1)) if side is None else side
+            self._add_event({"t": t_abs, "type": "look_around" if name == "look_around" else "idle",
+                             "name": name, "intensity": intensity, "side": side})
+        return {"side": side, "amplitude_factor": intensity * self.library.get("idle_scale", 1.0)}
+
+    def add_expr(self, t_abs, name, intensity=1.0, side=None, hold=None, playback_at=None,
+                 clear_gestures=False):
         cfg = self.config
         jitter = cfg["jitter"]
         with self.lock:
@@ -276,7 +327,8 @@ class Motion:
             # return timer, decide when to leave a pose.
             self._add_event({"t": t_abs, "type": "expr", "name": name,
                              "intensity": factor, "side": side, "enter": enter,
-                             "hold": float("inf") if hold is None else hold},
+                             "hold": float("inf") if hold is None else hold,
+                             "clear_gestures": clear_gestures},
                             playback_at=playback_at)
         return {"side": side, "amplitude_factor": factor, "enter_duration": enter}
 

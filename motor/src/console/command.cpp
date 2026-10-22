@@ -2,6 +2,7 @@
 // Created by bismarck on 11/19/22.
 //
 
+#include "probe.hpp"
 #include "command.h"
 
 void sendToQueue(int slaveId, const Queue_Msg_ptr& msg) {
@@ -51,10 +52,12 @@ unsigned motorIdGet(const std::vector<std::string> & input) {
 
     EtherCAT_Msg_ptr msg = std::make_shared<EtherCAT_Msg>();
     MotorIDReading(msg.get());
+    probe::send("manual_motor_packets", double(msg->motor[0].dlc));
     Motor_Msg reply{};
     if (!queryMotor(slaveId, 1, msg->motor[0], reply))
         throw std::runtime_error("ID query timed out or bus unavailable");
     if (reply.data[0] == 0x80) throw std::runtime_error("Motor ID query failed");
+    probe::send("manual_motor_reply", double((reply.data[3] << 8) | reply.data[4]));
     std::cout << "MotorIdGet: SlaveId=" << slaveId << " MotorId="
               << ((reply.data[3] << 8) | reply.data[4]) << '\n';
     return 0;
@@ -82,6 +85,7 @@ unsigned motorIdSet(const std::vector<std::string> & input) {
 
     EtherCAT_Msg_ptr msg = std::make_shared<EtherCAT_Msg>();
     MotorIDSetting(msg.get(), motor_id, motor_id_new);
+    probe::send("manual_motor_packets", std::vector<double>{double(motor_id), double(motor_id_new)});
     Queue_Msg_ptr queue_msg = createQueueMsg(msg, 1);
     sendToQueue(slaveId, queue_msg);
     return 0;
@@ -105,6 +109,7 @@ unsigned motorIdReset(const std::vector<std::string> & input) {
     }
     EtherCAT_Msg_ptr msg = std::make_shared<EtherCAT_Msg>();
     MotorIDReset(msg.get());
+    probe::send("manual_motor_packets", double(msg->motor[0].dlc));
     Queue_Msg_ptr queue_msg = createQueueMsg(msg, 1);
     sendToQueue(slaveId, queue_msg);
     return 0;
@@ -133,6 +138,7 @@ unsigned motorZeroSet(const std::vector<std::string> & input) {
     EtherCAT_Msg_ptr msg = std::make_shared<EtherCAT_Msg>();
 
     Motor_Setzero(msg.get(), passage, motorId);
+    probe::send("manual_motor_packets", std::vector<double>{double(motorId), 0.0});
 
     Queue_Msg_ptr queue_msg = createQueueMsg(msg, passage);
     sendToQueue(slaveId, queue_msg);
@@ -175,6 +181,7 @@ unsigned motorSpeedSet(const std::vector<std::string> & input) {
     if (passage < 1 || passage > 6) throw std::runtime_error("PassAge must be in [1, 6]");
     warnNeckRange();
     set_motor_speed(msg.get(), passage ,motor_id, spd, cur, ack_status);
+    probe::send("manual_motor_packets", std::vector<double>{double(motor_id), spd, cur / 10.0});
     Queue_Msg_ptr queue_msg = createQueueMsg(msg, passage);
     sendToQueue(slaveId, queue_msg);
     return 0;
@@ -217,6 +224,7 @@ unsigned motorPositionSet(const std::vector<std::string> & input) {
     if (passage < 1 || passage > 6) throw std::runtime_error("PassAge must be in [1, 6]");
     warnNeckRange();
     set_motor_position(msg.get(), passage, motor_id, pos, spd, cur, ack_status);
+    probe::send("manual_motor_packets", std::vector<double>{double(motor_id), pos, spd / 10.0, cur / 10.0});
     Queue_Msg_ptr queue_msg = createQueueMsg(msg, passage);
     sendToQueue(slaveId, queue_msg);
     return 0;
@@ -235,9 +243,11 @@ unsigned motorAngelGet(const std::vector<std::string> & input) {
         EtherCAT_Msg msg{};
         Motor_Msg reply{};
         get_motor_parameter(&msg, passage, motor_id, param_get_pos);
+        probe::send("manual_motor_packets", double(msg.motor[passage - 1].dlc));
         if (!queryMotor(slaveId, passage, msg.motor[passage - 1], reply))
             throw std::runtime_error("Angle query timed out or bus unavailable");
         if (reply.data[0] & 0x1f) throw std::runtime_error("Motor returned an error");
+        probe::send("manual_motor_reply", motorParameterValue(reply));
         std::cout << "MotorAngelGet: MotorId=" << motor_id << " angle=" << motorParameterValue(reply) << " deg\n";
     } catch (const std::exception& e) {
         std::cout << "Parameter error" << e.what() << "\n";
@@ -269,6 +279,7 @@ unsigned motorStop(const std::vector<std::string> & input) {
     EtherCAT_Msg_ptr msg = std::make_shared<EtherCAT_Msg>();
     if (passage < 1 || passage > 6) throw std::runtime_error("PassAge must be in [1, 6]");
     set_motor_cur_tor(msg.get(), passage, motor_id, 10, 2, 0);
+    probe::send("manual_motor_packets", double(msg->motor[passage - 1].dlc));
     Queue_Msg_ptr queue_msg = createQueueMsg(msg, passage);
     sendToQueue(slaveId, queue_msg);
     std::cout << "MotorStop: brake command queued for motor " << motor_id << '\n';

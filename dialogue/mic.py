@@ -1,9 +1,16 @@
 """PulseAudio capture adapted from Project-Neck/runtime/audio/runtime/audio_capture.py."""
 
 import os
+from pathlib import Path
 import queue
 import subprocess
+import sys
 import threading
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party/probe"))
+from probe import probe
 
 SAMPLE_RATE = 16_000
 FRAME_MS = 20
@@ -24,6 +31,8 @@ class MicrophoneCapture:
             pending.extend(chunk)
             while len(pending) >= FRAME_BYTES:
                 frame = bytes(pending[:FRAME_BYTES])
+                probe("microphone_pcm_source", float(np.sqrt(np.mean(
+                    (np.frombuffer(frame, dtype="<i2").astype(np.float64) / 32768.0) ** 2))))
                 del pending[:FRAME_BYTES]
                 try:
                     self.frames.put_nowait(frame)
@@ -33,6 +42,7 @@ class MicrophoneCapture:
     def start(self):
         if self.process is not None:
             return
+        probe("capture_state_command", "start")
         if self.port:
             subprocess.run(["pactl", "set-source-port",
                             self.source or "@DEFAULT_SOURCE@", self.port], check=True)
@@ -58,6 +68,7 @@ class MicrophoneCapture:
     def stop(self):
         if self.process is None:
             return
+        probe("capture_state_command", "stop")
         process = self.process
         if process.poll() is None:
             process.terminate()

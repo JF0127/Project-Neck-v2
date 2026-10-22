@@ -1,6 +1,7 @@
 #include <cmath>
 
 #include "neck/controller.h"
+#include "probe.hpp"
 #include "neck_sweep.h"
 #include "neck_stream.h"
 #include "ethercat/periodic_clock.h"
@@ -227,7 +228,12 @@ void checkBus() {
 }
 std::array<Feedback, 3> snapshot(const std::array<int, 3>& ids) {
     std::lock_guard<std::mutex> lock(feedback_mutex);
-    return {feedback[ids[0]], feedback[ids[1]], feedback[ids[2]]};
+    const std::array<Feedback, 3> probe_values{feedback[ids[0]], feedback[ids[1]], feedback[ids[2]]};
+    probe::send("motor_feedback_degrees", std::vector<double>{
+        probe_values[0].value[0], probe_values[1].value[0], probe_values[2].value[0],
+        probe_values[0].value[1], probe_values[1].value[1], probe_values[2].value[1],
+        probe_values[0].value[2], probe_values[1].value[2], probe_values[2].value[2]});
+    return probe_values;
 }
 struct Cancelled {};
 Triple freshMotors(const std::array<int, 3>& ids) {
@@ -239,6 +245,7 @@ Triple freshMotors(const std::array<int, 3>& ids) {
             EtherCAT_Msg request{};
             Motor_Msg reply{};
             get_motor_parameter(&request, i + 1, ids[i], param_get_pos);
+            probe::send("drive_session_events", "refresh_position: " + std::to_string(ids[i]));
             if (!queryMotor(0, i + 1, request.motor[i], reply) || (reply.data[0] & 0x1f))
                 throw std::runtime_error("No fresh position feedback for motor " + std::to_string(ids[i]));
             q[i] = motorParameterValue(reply);
@@ -264,6 +271,8 @@ std::array<Feedback, 3> queryFeedback(const std::array<int, 3>& ids, const std::
         for (int i = 0; i < 3; ++i)
             get_motor_parameter(&frame, i + 1, ids[i], field + 1);
         auto requested = Clock::now();
+        probe::send("drive_session_events", field == 0 ? "query_position" :
+                    (field == 1 ? "query_velocity" : "query_current"));
         writeNeckDirect(frame); // 只查询位置、速度、电流，不发送运动目标。
         for (;;) {
             if (cancel.load()) throw Cancelled{};
@@ -281,6 +290,7 @@ std::array<Feedback, 3> queryFeedback(const std::array<int, 3>& ids, const std::
                                              "query velocity timeout; retry",
                                              "query current timeout; retry"};
                 EtherCAT_Init_Failure(steps[field]);
+                probe::send("drive_session_events", steps[field]);
                 requested = Clock::now();
                 writeNeckDirect(frame);
             }
@@ -410,6 +420,7 @@ struct Controller::Impl {
         install(moveTrajectory(from.rpy, target, duration), mono(), 1, 0, target_usable);
     }
     void startSession() {
+        probe::send("drive_session_events", "start");
         if (!running.load()) {
             EtherCAT_Init_Failure("start neck session: bus not running");
             throw std::runtime_error("EtherCAT initialization failed");
@@ -444,6 +455,7 @@ struct Controller::Impl {
                   << measured_rpy[2] << "; usable=" << (status.usable ? "yes" : "no") << '\n';
     }
     void closeSession() {
+        probe::send("drive_session_events", "stop");
         udp.reset();
         stream.reset();
         log.reset();
@@ -525,6 +537,10 @@ struct Controller::Impl {
         CommandRow row{};
         row.plan_time = now - epoch;
         row.sample = {target.rpy, target.q, target.motor_velocity};
+        probe::send("motor_targets_degrees", std::vector<double>{
+            target.q[0], target.q[1], target.q[2],
+            target.motor_velocity[0], target.motor_velocity[1], target.motor_velocity[2],
+            options.at("kp"), options.at("kd"), comp, lead, options.at("tf")});
         row.buffer_ms = target.buffer_ms;
         row.state = target.state;
         row.step_id = step_id;
@@ -601,6 +617,7 @@ struct Controller::Impl {
                 }
                 changed.notify_all();
                 if (!stopped) std::cerr << "Neck controller: " << e.what() << '\n';
+                if (!stopped) probe::send("neck_status_result", e.what());
             }
         }
         closeSession();
@@ -634,6 +651,7 @@ void Controller::stop() {
 void Controller::release() {
     stop();
     impl->post([p = impl.get()] {
+        probe::send("drive_session_events", "release");
         EtherCAT_Msg frame{};
         for (int i = 0; i < 3; ++i)
             send_motor_ctrl_cmd(&frame, i + 1, p->model.ids[i], 0, 1, 0, 0, 0);
@@ -776,7 +794,11 @@ void Controller::waitIdle() {
     impl->changed.wait(lock, [this] { return !impl->pending && !impl->working && impl->idle; });
     if (impl->error) std::rethrow_exception(impl->error);
 }
-Status Controller::status() const { return poseStatus(impl->model, freshMotors(impl->model.ids)); }
+Status Controller::status() const {
+    const auto probe_status = poseStatus(impl->model, freshMotors(impl->model.ids));
+    probe::send("neck_status_result", probe_status.detail);
+    return probe_status;
+}
 State Controller::state() const {
     std::lock_guard<std::mutex> lock(impl->mutex);
     return impl->state;

@@ -3,6 +3,7 @@
 
 import argparse
 from bisect import bisect_left, bisect_right
+import builtins
 import csv
 from datetime import datetime
 import json
@@ -15,12 +16,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "third_party/probe"))
+from probe import probe
+
 sys.path.insert(0, str(ROOT / "motor/python"))
 from neck.neck_calibration import MODEL_JOINTS, load_neck_model
 
 AXES = ("roll", "pitch", "yaw")
 NEAR_TARGET = 1 / 60  # Half a 30 Hz frame, not an ordinary adjacent sample.
 ACTIONS = {"backchannel", "ack", "speak_gaze_away", "look_back"}
+
+
+def print(*args, **kwargs):
+    builtins.print(*args, **kwargs)
+    try:
+        probe("run_analysis_report", " ".join(map(str, args)))
+    except Exception:
+        pass
 
 
 def event_name(name):
@@ -176,7 +188,11 @@ def analyze(args):
     feedback = np.full(q.shape, np.nan)
     valid = np.all(np.isfinite(q), axis=1)
     if np.any(valid):
+        for probe_row in q[valid]:
+            probe("logged_motor_angles", probe_row.tolist())
         feedback[valid] = model.motor_to_rpy(q[valid], degrees=True)
+        for probe_row in feedback[valid]:
+            probe("reconstructed_head_angles", probe_row.tolist())
     print("反馈：使用主 CSV 的电机位置快照，经 motor/config/neck_calibration.json 和正运动学换算 RPY；不把电机角当头部角。")
     print("规划：roll_deg/pitch_deg/yaw_deg（限幅后的下发规划）；target_* 在当前日志中是同值副本。")
     print("发送端阈值：发送间隔>0.1 s；未来点 |Δt_target|≤16.667 ms 且任一轴差>0.5°；30 Hz 二阶差分>2°。")
@@ -280,6 +296,7 @@ def main():
     try:
         analyze(args)
     except (OSError, ValueError, KeyError, np.linalg.LinAlgError) as exc:
+        probe("run_analysis_report", f"分析失败：{exc}")
         parser.exit(1, f"分析失败：{exc}\n")
 
 

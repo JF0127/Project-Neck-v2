@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+import sys
 from zoneinfo import ZoneInfo
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party/probe"))
+from probe import probe
 
 SHANGHAI_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
@@ -23,4 +28,5 @@ class CurrentDateTime:
             "time": current.strftime("%H:%M:%S"),
             "weekday": ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")[current.weekday()],
         }
+        probe("current_datetime_context", f"{value['datetime']} {value['weekday']}")
         return value

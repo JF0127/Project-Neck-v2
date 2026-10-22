@@ -9,6 +9,7 @@
 #include <readline/readline.h>
 #include <map>
 
+#include "probe.hpp"
 #include "Console.hpp"
 #include "command.h"
 #include "time.h"
@@ -21,6 +22,23 @@ namespace cr = CppReadline;
 using ret = cr::Console::ReturnCode;
 std::thread comThread;
 
+namespace {
+void probeConsoleRequest(const std::vector<std::string>& input) noexcept {
+    try {
+        std::string text;
+        for (const auto& word : input) {
+            if (!text.empty()) text += ' ';
+            text += word;
+        }
+        probe::send("motor_console_request", text);
+    } catch (...) {}
+}
+void probeConsoleResponse(const std::string& command, unsigned code) noexcept {
+    try {
+        probe::send("motor_console_response", command + ": return=" + std::to_string(code));
+    } catch (...) {}
+}
+}
 
 void comImpl() {
     cr::Console c(">");
@@ -50,16 +68,25 @@ void comImpl() {
     for (const auto& cmd : commands) {
         if (cmd.first.rfind("Motor", 0) == 0) {
             c.registerCommand(cmd.first, [execute = cmd.second](const std::vector<std::string>& input) {
+                probeConsoleRequest(input);
                 try {
                     if (input[0] == "MotorSpeedSet" || input[0] == "MotorPositionSet" || input[0] == "MotorStop")
                         stopNeck();
-                    return execute(input);
+                    const auto code = execute(input);
+                    probeConsoleResponse(input[0], code);
+                    return code;
                 } catch (const std::exception& e) {
                     std::cout << input[0] << ": " << e.what() << '\n';
+                    probe::send("motor_console_response", e.what());
                     return 1;
                 }
             });
-        } else c.registerCommand(cmd.first, cmd.second);
+        } else c.registerCommand(cmd.first, [execute = cmd.second](const std::vector<std::string>& input) {
+            probeConsoleRequest(input);
+            const auto code = execute(input);
+            probeConsoleResponse(input[0], code);
+            return code;
+        });
     }
 
     c.executeCommand("help");

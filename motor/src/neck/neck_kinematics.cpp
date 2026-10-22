@@ -1,4 +1,5 @@
 #include "neck_kinematics.h"
+#include "probe.hpp"
 
 #include <boost/property_tree/json_parser.hpp>
 #include <limits>
@@ -68,6 +69,7 @@ Solution Model::parallel(double a, double b) {
 }
 
 Solution Model::inverse(const Vec& rpy) const {
+    probe::send("head_pose_inverse_input", std::vector<double>(rpy.begin(), rpy.end()));
     const Vec r = rpy / RAD_TO_DEG;
     const double cr = std::cos(r[0]), sr = std::sin(r[0]);
     const double cp = std::cos(r[1]), sp = std::sin(r[1]);
@@ -84,6 +86,9 @@ Solution Model::inverse(const Vec& rpy) const {
         result.q[i] = sign[i] * (result.q[i] - zero[i]) * RAD_TO_DEG + offset[i];
         result.usable = result.usable && result.q[i] >= lower[i] && result.q[i] <= upper[i];
     }
+    probe::send("motor_pose_inverse_result", std::vector<double>{
+        result.q[0], result.q[1], result.q[2], result.margin,
+        double(result.reachable), double(result.usable)});
     return result;
 }
 
@@ -115,6 +120,7 @@ Solution Model::evaluate(const Vec& measured) const {
 }
 
 Vec Model::forward(const Vec& measured) const {
+    probe::send("motor_pose_forward_input", std::vector<double>(measured.begin(), measured.end()));
     Vec q;
     for (int i = 0; i < 3; ++i) q[i] = (measured[i] - offset[i]) / (sign[i] * RAD_TO_DEG) + zero[i];
     double a = 0, b = 0;
@@ -132,8 +138,10 @@ Vec Model::forward(const Vec& measured) const {
     }
     const double ca = std::cos(a), sa = std::sin(a), cb = std::cos(b), sb = std::sin(b);
     const double cp = std::cos(q[2]), sp = std::sin(q[2]);
-    return Vec{std::atan2(sa * cp - ca * sb * sp, ca * cb),
+    const Vec probe_rpy = Vec{std::atan2(sa * cp - ca * sb * sp, ca * cb),
                std::asin(std::clamp(-ca * sb * cp - sa * sp, -1.0, 1.0)),
                std::atan2(ca * sp - sa * sb * cp, cb * cp)} * RAD_TO_DEG;
+    probe::send("head_pose_forward_result", std::vector<double>(probe_rpy.begin(), probe_rpy.end()));
+    return probe_rpy;
 }
 } // namespace neck

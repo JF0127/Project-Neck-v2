@@ -15,6 +15,7 @@ include_directories(
         thirdparty/cpp-readline/src
 )
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../third_party/probe)
 
 set(CMAKE_CXX_STANDARD 17)
 

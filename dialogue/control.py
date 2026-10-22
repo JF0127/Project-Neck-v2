@@ -4,12 +4,16 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+from pathlib import Path
 import select
 import sys
 import termios
 import threading
 import time
 import tty
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party/probe"))
+from probe import probe
 
 
 class Controls:
@@ -32,8 +36,10 @@ class Controls:
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+                probe("conversation_control_response", data.decode("utf-8"))
 
             def do_GET(self):
+                probe("conversation_control_request", f"GET {self.path}")
                 if self.path != "/state":
                     self.reply(404, {"error": "not found"})
                     return
@@ -42,6 +48,7 @@ class Controls:
                 self.reply(200, {"state": state})
 
             def do_POST(self):
+                probe("conversation_control_request", f"POST {self.path}")
                 if self.path == "/toggle":
                     state = control.change(None, "api")
                 elif self.path == "/state":
@@ -79,18 +86,25 @@ class Controls:
             self.state = state
             if source != "auto":
                 self.revision += 1
+            if source == "auto":
+                probe("conversation_state_automatic", state)
+            probe("conversation_state_changed",
+                  f"{previous}->{state}; source={source}; revision={self.revision}")
             interrupted = self.on_change(previous, state, source)
             event = {"at": stamp, "at_mono": mono, "from": previous, "to": state,
                      "source": source, "interrupted_reply": interrupted}
             with self.log_path.open("a", encoding="utf-8") as log:
                 log.write(json.dumps(event, ensure_ascii=False) + "\n")
             print(f"\n[状态] {previous} → {state}（来源：{source}）", flush=True)
+            if source != "api":
+                probe("conversation_control_response", f"{previous}->{state}; source={source}")
             return state
 
     def quit(self):
         with self.lock:
             if not self.stopped.is_set():
                 self.stopped.set()
+                probe("conversation_state_changed", "quit")
                 self.on_quit()
 
     def _keys(self):
@@ -101,8 +115,10 @@ class Controls:
             if not key:
                 return
             if key == b" ":
+                probe("conversation_control_request", "key: space")
                 self.change(None, "key")
             elif key == b"q":
+                probe("conversation_control_request", "key: q")
                 self.quit()
 
     def start(self):

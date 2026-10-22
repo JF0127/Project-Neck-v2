@@ -20,12 +20,7 @@
     "base_pitch": 3.0,
     "idle_breath": {
       "enabled": true,
-      "axis": "yaw",
-      "amp": 8.0,
-      "period": 8.0,
-      "period_jitter": 0.15,
-      "fade": 1.0,
-      "pitch_offset": 0
+      "fade": 1.0
     },
     "gain": 1.0,
     "enter_scale": 1.0,
@@ -95,7 +90,8 @@
       "amp": 0,
       "half_period": 0.2
     },
-    "thinking_delay": 0.8,
+    "thinking_delay": 0.5,
+    "post_speech_wait": 4.0,
     "speak_gaze_away": {
       "yaw": 8,
       "pitch": 0,
@@ -106,6 +102,16 @@
   "default_hold": 2.5,
   "return_to": "attentive",
   "return_duration": 1.2,
+  "idle_scale": 1.0,
+  "idle_poses": {
+    "rest_calm": {"pose": [0, 0, 0], "enter": 2.0},
+    "rest_low": {"pose": [0, 8, 0], "enter": 2.5},
+    "ponder": {"pose": [-4, 12, 10], "enter": 3.0, "mirror_axes": [2]},
+    "gaze_side": {"pose": [0, 3, 25], "enter": 2.5, "mirror_axes": [2]},
+    "gaze_up": {"pose": [0, -7, 8], "enter": 3.0, "mirror_axes": [2]},
+    "lean_tilt": {"pose": [6, 4, 8], "enter": 2.5, "mirror_axes": [0, 2]}
+  },
+  "look_around": {"yaw": 30, "hold": 1.5},
   "expressions": {
     "neutral": {
       "pose": [
@@ -123,6 +129,7 @@
       ],
       "enter": 0.8
     },
+    "think_quiet": {"pose": [-3, 6, 0], "enter": 1.0, "relative": true},
     "thinking": {
       "pose": [
         -2,

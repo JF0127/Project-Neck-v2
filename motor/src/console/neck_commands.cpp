@@ -1,6 +1,7 @@
 #include <cmath>
 
 #include "command.h"
+#include "probe.hpp"
 #include "neck/controller.h"
 #include "neck/neck_sweep.h"
 
@@ -67,6 +68,16 @@ unsigned neckCommand(const std::vector<std::string>& input) {
         if (input.size() < first_option) {
             neckHelp();
             return 1;
+        }
+        if (input[0] != "NeckStatus") {
+            try {
+                std::string probe_request;
+                for (const auto& word : input) {
+                    if (!probe_request.empty()) probe_request += ' ';
+                    probe_request += word;
+                }
+                probe::send("neck_motion_request", probe_request);
+            } catch (...) {}
         }
         if (input[0] == "NeckStop") {
             stopNeck();

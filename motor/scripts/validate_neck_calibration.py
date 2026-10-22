@@ -2,11 +2,15 @@
 """仅离线校验标定和可用范围；任何不一致返回非零退出码。"""
 
 import argparse
+import builtins
 import json
 from pathlib import Path
 import sys
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "third_party/probe"))
+from probe import probe
 
 # 允许从任意工作目录运行本脚本，不要求安装本项目为 Python 包。
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +19,14 @@ from neck.neck_calibration import DEFAULT_CONFIG_PATH, MODEL_JOINTS, load_neck_m
 
 
 ANGLE_ATOL_DEG = 1e-9  # 仅用于浮点换算/限位推导相等性，不放宽可用性判据。
+
+
+def print(*args, **kwargs):
+    builtins.print(*args, **kwargs)
+    try:
+        probe("calibration_result_report", " ".join(map(str, args)))
+    except Exception:
+        pass
 
 
 def require(condition, message):
@@ -33,7 +45,12 @@ def symmetric_grid(half_span_deg, step_deg):
 
 
 def usable_points(model, limits_deg, points_deg):
+    for probe_row in np.atleast_2d(points_deg):
+        probe("calibration_scan_points", probe_row.tolist())
     q_deg, infos = model.rpy_to_motor(points_deg, degrees=True)
+    for probe_row, probe_info in zip(q_deg, infos):
+        probe("calibration_scan_results", probe_row.tolist() + [
+            float(probe_info["margin_deg"]), float(probe_info["reachable"]), float(probe_info["ok"])])
     return (
         np.array([info["ok"] for info in infos], dtype=bool)
         & np.all(np.isfinite(q_deg), axis=1)
@@ -82,7 +99,10 @@ def validate(config_path):
     print(f"模型 min_margin_deg: {model.min_margin:.1f}")
 
     expected_zero_deg = np.array([motor["calibration"]["offset_deg"] for motor in motors])
+    probe("calibration_scan_points", [0.0, 0.0, 0.0])
     zero_deg, info = model.rpy_to_motor([0, 0, 0], degrees=True)
+    probe("calibration_scan_results", zero_deg.tolist() + [
+        float(info["margin_deg"]), float(info["reachable"]), float(info["ok"])])
     require(info["ok"], "rpy = 0 时模型不满足 ok")
     require(np.allclose(zero_deg, expected_zero_deg, atol=ANGLE_ATOL_DEG, rtol=0),
             f"零位不一致: 实际 {zero_deg}, 配置 {expected_zero_deg}")

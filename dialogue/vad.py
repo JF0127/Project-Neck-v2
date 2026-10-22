@@ -3,8 +3,12 @@
 from collections import deque
 import math
 from pathlib import Path
+import sys
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "third_party/probe"))
+from probe import probe
 
 from .mic import FRAME_BYTES, FRAME_MS, SAMPLE_RATE
 
@@ -39,6 +43,8 @@ class SileroVAD:
         """Return (start/end/None, PCM to push to ASR), including pre-roll once."""
         if len(frame) != FRAME_BYTES:
             raise ValueError(f"VAD input must be {FRAME_BYTES} bytes")
+        probe("microphone_pcm_captured", float(np.sqrt(np.mean(
+            (np.frombuffer(frame, dtype="<i2").astype(np.float64) / 32768.0) ** 2))))
         if not self.in_speech:
             self.pre_roll.append(frame)
         self.pending.extend(frame)
@@ -67,4 +73,8 @@ class SileroVAD:
             self.pre_roll.clear()
         else:
             pcm = frame if self.in_speech or event == "end" else b""
+        probe("speech_boundary_events", f"{event or 'ongoing'}; silence_samples={self.silence_samples}")
+        if pcm:
+            probe("speech_pcm_selected", float(np.sqrt(np.mean(
+                (np.frombuffer(pcm, dtype="<i2").astype(np.float64) / 32768.0) ** 2))))
         return event, pcm

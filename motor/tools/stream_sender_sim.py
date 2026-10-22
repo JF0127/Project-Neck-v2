@@ -15,6 +15,11 @@ t_mono_s = CLOCK_MONOTONIC 时间（Python 的 time.monotonic() 在 Linux 上即
   python3 stream_sender_sim.py 02_speech_gestures_100hz.csv --repeat 2 --gap 3     # 两句话，中间停 3 s
 """
 import argparse, csv, random, socket, time
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "third_party/probe"))
+from probe import probe
 
 
 def load(path, out_hz):
@@ -77,6 +82,8 @@ def main():
             msg = ''.join(f'{T0 + s[0]:.6f},{s[1]:.4f},{s[2]:.4f},{s[3]:.4f}\n' for s in seg)
             if msg:
                 sock.sendto(msg.encode(), (a.host, a.port))
+                for probe_sample in seg:
+                    probe("head_pose_udp_demo", list(probe_sample[1:]))
             sent = time.monotonic()
             margin = (T0 + seg[0][0] - sent) * 1000 if seg else float('nan')
             log.append((u, k, lo, hi, sent - start, margin))

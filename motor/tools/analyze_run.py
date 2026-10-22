@@ -2,16 +2,28 @@
 """离线分析一次运行的主 CSV 及同名 _fb.csv。"""
 
 import argparse
+import builtins
 from pathlib import Path
 import re
 import sys
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "third_party/probe"))
+from probe import probe
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from neck.neck_calibration import MODEL_JOINTS, load_neck_model
 
 AXES = ("roll", "pitch", "yaw")
+
+
+def print(*args, **kwargs):
+    builtins.print(*args, **kwargs)
+    try:
+        probe("run_analysis_report", " ".join(map(str, args)))
+    except Exception:
+        pass
 
 
 def spans(mask):
@@ -70,7 +82,12 @@ def stream_summary(main, fb, model, ids):
     # 使用全程反馈，避免裁掉等待/保持段内的切换窗口；先求导，再分别平滑 20 ms。
     ft = fb["timestamp_unix_s"] - (main["timestamp_unix_s"][0] - t[0])
     q = np.column_stack([fb[f"motor{i}_feedback_position_deg"] for i in ids])
-    rpy = np.degrees(np.unwrap(np.radians(model.motor_to_rpy(q, degrees=True)), axis=0))
+    for probe_row in q:
+        probe("logged_motor_angles", probe_row.tolist())
+    probe_rpy = model.motor_to_rpy(q, degrees=True)
+    for probe_row in probe_rpy:
+        probe("reconstructed_head_angles", probe_row.tolist())
+    rpy = np.degrees(np.unwrap(np.radians(probe_rpy), axis=0))
     dt = float(np.median(np.diff(ft)))
     grid = np.linspace(ft[0], ft[-1], round((ft[-1] - ft[0]) / dt) + 1)
     dt = grid[1] - grid[0]
@@ -133,7 +150,11 @@ def tracking(main, fb, model, ids, period):
     q = np.column_stack([fb[f"motor{i}_feedback_position_deg"][selected] for i in ids])
     if not np.all(np.isfinite(q)):
         raise ValueError("执行段电机反馈位置含无效数值")
+    for probe_row in q:
+        probe("logged_motor_angles", probe_row.tolist())
     actual = model.motor_to_rpy(q, degrees=True)
+    for probe_row in actual:
+        probe("reconstructed_head_angles", probe_row.tolist())
     if not np.all(np.isfinite(actual)):
         raise ValueError("运动学换算得到无效 RPY")
     actual = np.degrees(np.unwrap(np.radians(actual), axis=0))
@@ -220,6 +241,7 @@ def main():
                   f"最高温度={maximum(main[prefix + 'temperature_degC'])} °C，"
                   f"最大电流={maximum(np.abs(current))} A")
     except (OSError, ValueError, ZeroDivisionError, np.linalg.LinAlgError) as exc:
+        probe("run_analysis_report", f"分析失败：{exc}")
         parser.exit(1, f"分析失败：{exc}\n")
 
 

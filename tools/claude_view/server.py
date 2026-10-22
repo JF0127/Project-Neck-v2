@@ -4,7 +4,11 @@
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import sys
 from urllib.parse import urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "third_party/probe"))
+from probe import probe
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +34,7 @@ class ReadOnlyHandler(BaseHTTPRequestHandler):
         self._serve(send_body=False)
 
     def _serve(self, send_body):
+        probe("structure_http_request", f"{self.command} {self.path}")
         try:
             route = ROUTES.get(urlsplit(self.path).path)
         except ValueError:
@@ -57,6 +62,8 @@ class ReadOnlyHandler(BaseHTTPRequestHandler):
         if send_body:
             try:
                 self.wfile.write(content)
+                probe("structure_html_response" if filename == "CLAUDE.html"
+                      else "structure_markdown_response", content.decode("utf-8", errors="replace"))
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
